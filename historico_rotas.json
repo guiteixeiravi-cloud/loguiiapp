@@ -1,0 +1,54 @@
+[
+    {
+        "timestamp": 1788209090.4967504,
+        "data_formatada": "31/08/2026 17:44",
+        "motorista": "Rodrigo",
+        "entregas": [
+            {
+                "cliente": "RONALDO DONIZETI DA SILVA",
+                "endereco": "AVENIDA EUFRASIA MONTEIRO, 900",
+                "pedido_num": "2",
+                "file_id": "bd_7070_1788207744.8120208",
+                "uid": "hist_1788209055.0904646_RONALDO DONIZETI DA SILVA",
+                "selecionado": true,
+                "urgente": true,
+                "horario": "13:30",
+                "lat": "-20.5134114",
+                "lon": "-47.3823250"
+            },
+            {
+                "cliente": "MARALINE CRISTINA SPIRLANDELLI",
+                "endereco": "RUA MAJOR MOURA MATTOS, 1190",
+                "pedido_num": "1",
+                "file_id": "bd_5086_1788207724.6968782",
+                "uid": "hist_1788209055.0905256_MARALINE CRISTINA SPIRLANDELLI",
+                "selecionado": true,
+                "urgente": true,
+                "horario": "14:00",
+                "lat": "-20.5290715",
+                "lon": "-47.4278769"
+            },
+            {
+                "cliente": "RONALDO SILVA VILAS BOAS",
+                "endereco": "RUA EMILIO MALIMPENSA, 788",
+                "pedido_num": "2",
+                "file_id": "bd_887_1788207752.8630652",
+                "uid": "hist_1788209055.0905144_RONALDO SILVA VILAS BOAS",
+                "selecionado": true,
+                "lat": "-20.5299377",
+                "lon": "-47.4406908"
+            },
+            {
+                "cliente": "ALEX SANDRO ALVES",
+                "endereco": "AVENIDA DOUTOR ABRAHAO, 1099",
+                "pedido_num": "5",
+                "file_id": "bd_2740_1788207760.2676258",
+                "uid": "hist_1788209055.0905_ALEX SANDRO ALVES",
+                "selecionado": true,
+                "lat": "-20.4913964",
+                "lon": "-47.4284691"
+            }
+        ],
+        "link_maps": "https://www.google.com/maps/dir/?api=1&origin=Rua+Doutor+Ivom+Rodrigues+Pereira,+5078,+Franca,+SP&destination=Rua+Doutor+Ivom+Rodrigues+Pereira,+5078,+Franca,+SP&waypoints=AVENIDA+EUFRASIA+MONTEIRO,+900,+Franca,+SP|RUA+MAJOR+MOURA+MATTOS,+1190,+Franca,+SP|RUA+EMILIO+MALIMPENSA,+788,+Franca,+SP|AVENIDA+DOUTOR+ABRAHAO,+1099,+Franca,+SP"
+    }
+]
