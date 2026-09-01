@@ -14,8 +14,13 @@ from io import BytesIO
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-# Apontando o caminho do leitor de imagens no Windows
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+import sys
+
+# Apontando o caminho do leitor de imagens:
+# Se for Windows (seu PC), usa o caminho do disco C:
+if sys.platform.startswith('win'):
+    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# Se for Linux (Nuvem do Streamlit), o sistema já sabe onde achar, então não precisa de caminho!
 
 # Configuração da Página
 st.set_page_config(page_title="LoGuii - Rotas", layout="wide", page_icon="logo.png")
