@@ -40,11 +40,20 @@ arquivo_usuarios = os.path.join(diretorio_atual, "usuarios.json")
 @st.cache_data
 def carregar_estoque():
     itens = []
-    caminho_pdf = os.path.join(diretorio_atual, "estoque.pdf")
     
-    if os.path.exists(caminho_pdf) and PyPDF2 is not None:
+    # O Linux diferencia maiúsculas de minúsculas, então buscamos as duas opções!
+    caminho_pdf_min = os.path.join(diretorio_atual, "estoque.pdf")
+    caminho_pdf_mai = os.path.join(diretorio_atual, "estoque.PDF")
+    
+    caminho_correto = None
+    if os.path.exists(caminho_pdf_min):
+        caminho_correto = caminho_pdf_min
+    elif os.path.exists(caminho_pdf_mai):
+        caminho_correto = caminho_pdf_mai
+    
+    if caminho_correto and PyPDF2 is not None:
         try:
-            with open(caminho_pdf, "rb") as f:
+            with open(caminho_correto, "rb") as f:
                 reader = PyPDF2.PdfReader(f)
                 for page in reader.pages:
                     text = page.extract_text()
@@ -64,7 +73,7 @@ def carregar_estoque():
             if itens:
                 return sorted(list(set(itens)))
         except Exception as e:
-            st.sidebar.error(f"Erro ao ler estoque.pdf: {e}")
+            st.sidebar.error(f"Erro ao ler arquivo de estoque: {e}")
             
     return ["Exemplo: Fita Adesiva - Cód 101", "Exemplo: Caixa Parda - Cód 102"]
 
