@@ -42,7 +42,7 @@ def carregar_estoque():
     itens = []
     caminho_pdf = os.path.join(diretorio_atual, "estoque.pdf")
     
-    if os.path.exists(caminho_pdf) and PyPDF2:
+    if os.path.exists(caminho_pdf) and PyPDF2 is not None:
         try:
             with open(caminho_pdf, "rb") as f:
                 reader = PyPDF2.PdfReader(f)
@@ -52,46 +52,21 @@ def carregar_estoque():
                         for line in text.split('\n'):
                             line = line.strip()
                             
-                            # Filtro inteligente: Pega o Código (números no início) e a Descrição.
-                            # Ignora tudo que vem depois de "MARCA PADRAO" ou de grandes espaços.
+                            # Filtro inteligente: Pega o Código e a Descrição, ignorando o resto.
                             match = re.search(r'^(\d{3,6})\s+(.+?)(?=\s+MARCA PADRAO|\s+MARCA\b|\s{2,})', line, re.IGNORECASE)
                             
                             if match:
                                 codigo = match.group(1).strip()
                                 descricao = match.group(2).strip()
-                                
-                                # Monta o item limpo: "3030 - ABRACADEIRA 100MM..."
                                 item_limpo = f"{codigo} - {descricao}"
                                 itens.append(item_limpo)
                                 
-            # Se encontrou os itens, remove duplicatas e organiza em ordem alfabética
             if itens:
                 return sorted(list(set(itens)))
         except Exception as e:
             st.sidebar.error(f"Erro ao ler estoque.pdf: {e}")
             
-    # Plano B só aparece se o arquivo não existir ou estiver corrompido
     return ["Exemplo: Fita Adesiva - Cód 101", "Exemplo: Caixa Parda - Cód 102"]
-
-lista_estoque = carregar_estoque()
-    
-    if os.path.exists(caminho_pdf) and PyPDF2:
-        try:
-            with open(caminho_pdf, "rb") as f:
-                reader = PyPDF2.PdfReader(f)
-                for page in reader.pages:
-                    text = page.extract_text()
-                    if text:
-                        for line in text.split('\n'):
-                            line = line.strip()
-                            # Só adiciona linhas que tenham letras/números (evita espaços em branco do PDF)
-                            if len(line) > 2 and re.search(r'[A-Za-z0-9]', line):
-                                itens.append(line)
-            return sorted(list(set(itens)))
-        except Exception as e:
-            st.sidebar.error(f"Erro ao ler estoque.pdf: {e}")
-            
-    return ["Exemplo: Fita Adesiva - Cód 101", "Exemplo: Caixa Parda - Cód 102"] # Padrão caso não ache o PDF
 
 lista_estoque = carregar_estoque()
 
@@ -324,7 +299,7 @@ if status_ok and not df_clientes.empty:
                     "urgente": False,
                     "horario": "",
                     "selecionado": True,
-                    "itens": [] # Novo campo para os itens do PDF
+                    "itens": [] 
                 })
                 salvar_pendentes(st.session_state.pendentes)
                 st.sidebar.success(f"{dados_cli['Cliente']} adicionado à fila!")
@@ -430,7 +405,6 @@ def gerar_pdf(ordem_entregas, nome_motorista):
         c.drawString(50, y, f"[{idx+1}] {prefixo}Cliente: {p['cliente']}{num_pedido_str}")
         c.setFillColorRGB(0, 0, 0) 
         
-        # Checkbox grande de confirmação de entrega do cliente inteiro
         c.rect(largura - 70, y - 10, 15, 15)
         
         y -= 15
@@ -438,7 +412,6 @@ def gerar_pdf(ordem_entregas, nome_motorista):
         c.drawString(50, y, f"Endereço: {p['endereco']}")
         y -= 15
         
-        # --- DESENHAR OS ITENS DO ESTOQUE COM CHECKBOXES MENORES ---
         if p.get('itens'):
             y -= 5
             c.setFont("Helvetica-Bold", 10)
@@ -449,9 +422,7 @@ def gerar_pdf(ordem_entregas, nome_motorista):
                 if y < 50:
                     c.showPage()
                     y = altura - 50
-                # Checkbox do item
                 c.rect(50, y, 10, 10) 
-                # Limita o texto para caber na folha sem cortar
                 texto_item = item[:85] + "..." if len(item) > 85 else item
                 c.drawString(65, y + 2, texto_item)
                 y -= 15
@@ -493,7 +464,6 @@ st.session_state.pendentes.sort(key=lambda x: not x.get('urgente', False))
 
 if st.session_state.pendentes:
     for i, p in enumerate(st.session_state.pendentes):
-        # Linha 1: Dados Principais
         col_sel, col_cli, col_end, col_ped, col_hor, col_bell, col_del = st.columns([0.5, 3, 3, 1.5, 1.5, 0.5, 0.5])
         
         p['selecionado'] = col_sel.checkbox("", value=p.get('selecionado', True), key=f"sel_{p['uid']}")
@@ -517,10 +487,8 @@ if st.session_state.pendentes:
             salvar_pendentes(st.session_state.pendentes)
             st.rerun()
             
-        # Linha 2: Barra de Pesquisa de Itens (Ocupando a largura quase total)
         _, col_itens = st.columns([0.5, 9.5])
         with col_itens:
-            # O multiselect permite pesquisar por nome, código ou qualquer palavra solta
             p['itens'] = st.multiselect("📦 Itens do Pedido (Pesquise por nome ou código):", options=lista_estoque, default=p.get('itens', []), key=f"itens_{p['uid']}")
 
         st.divider()
@@ -621,7 +589,6 @@ if historico:
                 num = f" (Ped: {p['pedido_num']})" if p.get('pedido_num') else ""
                 st.write(f"-{urg} {p['cliente']}{num}: *{p['endereco']}*")
                 
-                # Mostra os itens também no histórico na tela
                 if p.get('itens'):
                     for item in p['itens']:
                         st.write(f"&nbsp;&nbsp;&nbsp;&nbsp;📦 {item}")
