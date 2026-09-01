@@ -15,20 +15,52 @@ from io import BytesIO
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-# Configuração da Página (Deve ser sempre a primeira linha)
+# Tenta importar o leitor de PDF
+try:
+    import PyPDF2
+except ImportError:
+    PyPDF2 = None
+
+# Configuração da Página
 st.set_page_config(page_title="LoGuii - Rotas", layout="wide", page_icon="logo.png")
 
-# Ajuste do Tesseract para rodar tanto no seu Windows quanto no Linux da Nuvem
+# Ajuste do Tesseract
 if sys.platform.startswith('win'):
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
-# Descobre a pasta atual dos arquivos
+# Diretórios e Arquivos Locais
 diretorio_atual = os.path.dirname(os.path.abspath(__file__))
 caminho_caricatura = os.path.join(diretorio_atual, "caricatura.png")
 caminho_logo = os.path.join(diretorio_atual, "logo.png")
 arquivo_historico = os.path.join(diretorio_atual, "historico_rotas.json")
 arquivo_pendentes = os.path.join(diretorio_atual, "pendentes.json")
-arquivo_usuarios = os.path.join(diretorio_atual, "usuarios.json") # Banco do Login
+arquivo_usuarios = os.path.join(diretorio_atual, "usuarios.json")
+
+# --- LEITURA DO ARQUIVO DE ESTOQUE ---
+@st.cache_data
+def carregar_estoque():
+    itens = []
+    caminho_pdf = os.path.join(diretorio_atual, "estoque.pdf")
+    
+    if os.path.exists(caminho_pdf) and PyPDF2:
+        try:
+            with open(caminho_pdf, "rb") as f:
+                reader = PyPDF2.PdfReader(f)
+                for page in reader.pages:
+                    text = page.extract_text()
+                    if text:
+                        for line in text.split('\n'):
+                            line = line.strip()
+                            # Só adiciona linhas que tenham letras/números (evita espaços em branco do PDF)
+                            if len(line) > 2 and re.search(r'[A-Za-z0-9]', line):
+                                itens.append(line)
+            return sorted(list(set(itens)))
+        except Exception as e:
+            st.sidebar.error(f"Erro ao ler estoque.pdf: {e}")
+            
+    return ["Exemplo: Fita Adesiva - Cód 101", "Exemplo: Caixa Parda - Cód 102"] # Padrão caso não ache o PDF
+
+lista_estoque = carregar_estoque()
 
 # --- BANCO DE DADOS DE USUÁRIOS ---
 def carregar_usuarios():
@@ -49,12 +81,9 @@ if "autenticado" not in st.session_state:
 
 # --- TELA DE LOGIN ---
 if not st.session_state.autenticado:
-    # Cria colunas para deixar o login centralizado e bonito
     col_vazia1, col_login, col_vazia2 = st.columns([1, 2, 1])
-    
     with col_login:
         st.markdown("<br><br>", unsafe_allow_html=True)
-        # Exibe a logo da empresa acima do login, se ela existir
         if os.path.exists(caminho_logo):
             st.image(caminho_logo, width=250)
             
@@ -62,46 +91,35 @@ if not st.session_state.autenticado:
         st.markdown("Faça login ou utilize a chave da União Embalagens para criar uma conta.")
         
         tab_entrar, tab_criar = st.tabs(["Entrar", "Criar Nova Conta"])
-        
         usuarios_db = carregar_usuarios()
         
-        # ABA 1: ENTRAR
         with tab_entrar:
             user_login = st.text_input("Usuário")
             pass_login = st.text_input("Senha", type="password")
-            
             if st.button("Entrar no Sistema", type="primary", use_container_width=True):
                 if user_login in usuarios_db and usuarios_db[user_login] == pass_login:
                     st.session_state.autenticado = True
-                    st.rerun() # Recarrega a página para entrar
+                    st.rerun() 
                 else:
                     st.error("Usuário ou senha incorretos. Tente novamente.")
                     
-        # ABA 2: CRIAR CONTA
         with tab_criar:
             chave_convite = st.text_input("Chave de Convite (Obrigatório)", type="password")
             novo_user = st.text_input("Defina um Nome de Usuário")
             nova_senha = st.text_input("Defina uma Senha", type="password")
-            
             if st.button("Cadastrar Usuário", type="primary", use_container_width=True):
                 if chave_convite != "Uniaologuii":
-                    st.error("❌ Chave de convite inválida! Solicite a chave correta com a administração.")
+                    st.error("❌ Chave de convite inválida!")
                 elif novo_user in usuarios_db:
-                    st.error("❌ Esse usuário já existe. Escolha outro.")
+                    st.error("❌ Esse usuário já existe.")
                 elif not novo_user or not nova_senha:
                     st.error("❌ Preencha todos os campos.")
                 else:
                     usuarios_db[novo_user] = nova_senha
                     salvar_usuarios(usuarios_db)
                     st.success("✅ Conta criada com sucesso! Volte na aba 'Entrar' para acessar o sistema.")
-    
-    # O comando abaixo IMPEDE que o resto do site carregue se não estiver logado
     st.stop() 
 
-
-# =====================================================================
-# SE O CÓDIGO CHEGOU AQUI, É PORQUE O USUÁRIO FEZ LOGIN COM SUCESSO!
-# =====================================================================
 
 # --- FUNÇÕES DE SALVAMENTO DOS PENDENTES ---
 def salvar_pendentes(lista):
@@ -146,11 +164,9 @@ aplicar_marca_dagua(caminho_caricatura)
 
 # --- CABEÇALHO DA PÁGINA PRINCIPAL ---
 col_texto, col_imagem = st.columns([5, 1])
-
 with col_texto:
     st.title("🚚 LoGuii Solução Logística")
-    st.markdown("Gerencie pedidos pendentes, defina urgências e gere rotas otimizadas com retorno à base.")
-
+    st.markdown("Gerencie pedidos pendentes, adicione itens do estoque e gere rotas otimizadas.")
 with col_imagem:
     if os.path.exists(caminho_caricatura):
         st.image(caminho_caricatura, width=130)
@@ -167,16 +183,13 @@ def carregar_clientes():
         os.path.join(diretorio_atual, "clientes.xlsx"),
         "Listagem_Clientes_de_Franca.xlsx" 
     ]
-    
     for arquivo in arquivos_possiveis:
         if os.path.exists(arquivo):
             try:
                 df = pd.read_excel(arquivo)
                 df.columns = df.columns.str.strip()
-                
                 if 'Código' in df.columns: df['Código'] = df['Código'].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
                 if 'Numero' in df.columns: df['Numero'] = df['Numero'].fillna('').astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
-                
                 return df, True, arquivo
             except Exception as e:
                 return pd.DataFrame(), False, f"Arquivo encontrado, erro na leitura: {str(e)}"
@@ -192,7 +205,6 @@ def gerenciar_historico(acao='listar', dados=None, idx=None):
             with open(arquivo_historico, "r", encoding="utf-8") as f:
                 historico = json.load(f)
         except: pass
-    
     tempo_atual = time.time()
     historico = [r for r in historico if (tempo_atual - r.get("timestamp", 0)) <= 172800]
     
@@ -200,7 +212,6 @@ def gerenciar_historico(acao='listar', dados=None, idx=None):
         historico.insert(0, dados)
         with open(arquivo_historico, "w", encoding="utf-8") as f:
             json.dump(historico, f, ensure_ascii=False, indent=4)
-            
     elif acao == 'excluir' and idx is not None:
         if 0 <= idx < len(historico):
             historico.pop(idx)
@@ -232,11 +243,9 @@ def otimizar_rota_com_urgencia(origem_lat, origem_lon, pedidos):
     unvisited = pedidos.copy()
     current_lat, current_lon = float(origem_lat), float(origem_lon)
     rota_ordenada = []
-    
     while unvisited:
         best_score = float('inf')
         best_idx = -1
-        
         for i, p in enumerate(unvisited):
             dist = haversine(current_lat, current_lon, float(p['lat']), float(p['lon']))
             bonus = 0
@@ -247,7 +256,6 @@ def otimizar_rota_com_urgencia(origem_lat, origem_lon, pedidos):
             if score < best_score:
                 best_score = score
                 best_idx = i
-                
         next_p = unvisited.pop(best_idx)
         rota_ordenada.append(next_p)
         current_lat = float(next_p['lat'])
@@ -260,18 +268,15 @@ if os.path.exists(caminho_logo):
     st.sidebar.markdown("<br>", unsafe_allow_html=True) 
 
 st.sidebar.header("🔍 1. Adicionar à Fila")
-
 if status_ok and not df_clientes.empty:
     colunas_necessarias = ['Código', 'Cliente', 'Endereco', 'Numero']
     if all(col in df_clientes.columns for col in colunas_necessarias):
         opcoes = df_clientes['Código'] + " - " + df_clientes['Cliente']
         cliente_selecionado = st.sidebar.selectbox("Digite o Código ou Nome do Cliente:", options=["Selecione..."] + opcoes.tolist())
-        
         if st.sidebar.button("➕ Enviar para Pendentes", type="primary"):
             if cliente_selecionado != "Selecione...":
                 codigo_busca = cliente_selecionado.split(" - ")[0]
                 dados_cli = df_clientes[df_clientes['Código'] == codigo_busca].iloc[0]
-                
                 rua_bruta = str(dados_cli['Endereco']).strip()
                 rua_limpa = rua_bruta.split('-')[0].strip()
                 num = str(dados_cli['Numero']).strip()
@@ -285,7 +290,8 @@ if status_ok and not df_clientes.empty:
                     "pedido_num": "",
                     "urgente": False,
                     "horario": "",
-                    "selecionado": True
+                    "selecionado": True,
+                    "itens": [] # Novo campo para os itens do PDF
                 })
                 salvar_pendentes(st.session_state.pendentes)
                 st.sidebar.success(f"{dados_cli['Cliente']} adicionado à fila!")
@@ -329,7 +335,7 @@ def extrair_dados_imagem(imagem):
         numero = numero_match.group(1).strip() if numero_match else ""
 
     endereco_completo = f"{rua}, {numero}" if (rua and numero) else rua if rua else "Endereço não identificado"
-    return {"cliente": cliente, "endereco": endereco_completo, "pedido_num": "", "urgente": False, "horario": "", "selecionado": True}
+    return {"cliente": cliente, "endereco": endereco_completo, "pedido_num": "", "urgente": False, "horario": "", "selecionado": True, "itens": []}
 
 def geocodificar(endereco):
     url = "https://nominatim.openstreetmap.org/search"
@@ -379,7 +385,7 @@ def gerar_pdf(ordem_entregas, nome_motorista):
     
     y = altura - 175
     for idx, p in enumerate(ordem_entregas):
-        if y < 80:
+        if y < 100:
             c.showPage()
             y = altura - 50
             
@@ -390,16 +396,37 @@ def gerar_pdf(ordem_entregas, nome_motorista):
         num_pedido_str = f" | Pedido: {p['pedido_num']}" if p.get('pedido_num') else ""
         c.drawString(50, y, f"[{idx+1}] {prefixo}Cliente: {p['cliente']}{num_pedido_str}")
         c.setFillColorRGB(0, 0, 0) 
-        y -= 15
         
+        # Checkbox grande de confirmação de entrega do cliente inteiro
+        c.rect(largura - 70, y - 10, 15, 15)
+        
+        y -= 15
         c.setFont("Helvetica", 11)
         c.drawString(50, y, f"Endereço: {p['endereco']}")
-        y -= 20
-        c.rect(largura - 70, y + 10, 15, 15)
-        y -= 10
+        y -= 15
+        
+        # --- DESENHAR OS ITENS DO ESTOQUE COM CHECKBOXES MENORES ---
+        if p.get('itens'):
+            y -= 5
+            c.setFont("Helvetica-Bold", 10)
+            c.drawString(50, y, "Itens a Carregar:")
+            y -= 15
+            c.setFont("Helvetica", 10)
+            for item in p['itens']:
+                if y < 50:
+                    c.showPage()
+                    y = altura - 50
+                # Checkbox do item
+                c.rect(50, y, 10, 10) 
+                # Limita o texto para caber na folha sem cortar
+                texto_item = item[:85] + "..." if len(item) > 85 else item
+                c.drawString(65, y + 2, texto_item)
+                y -= 15
+                
+        y -= 5
+        c.line(50, y, largura - 50, y)
+        y -= 25
 
-    c.line(50, y - 5, largura - 50, y - 5)
-    y -= 25
     c.setFont("Helvetica-Bold", 12)
     c.drawString(50, y, "📍 RETORNO: Base União Embalagens")
     y -= 15
@@ -427,19 +454,13 @@ if st.sidebar.button("🚪 Sair do Sistema (Logout)"):
 
 # --- LISTAGEM DE PENDENTES ---
 st.subheader("📋 Fila de Pedidos Pendentes")
-st.markdown("Marque apenas os que irão nesta viagem. Clique no 🔕 para marcar como **URGENTE**.")
+st.markdown("Marque apenas os que irão nesta viagem. Selecione os itens do estoque e defina urgências.")
 
 st.session_state.pendentes.sort(key=lambda x: not x.get('urgente', False))
 
 if st.session_state.pendentes:
-    c_sel, c_cli, c_end, c_ped, c_hor, c_bell, c_del = st.columns([0.5, 3, 3, 1.5, 1.5, 0.5, 0.5])
-    c_cli.markdown("**Cliente**")
-    c_end.markdown("**Endereço**")
-    c_ped.markdown("**Nº Ped.**")
-    c_hor.markdown("**Horário**")
-    st.divider()
-
     for i, p in enumerate(st.session_state.pendentes):
+        # Linha 1: Dados Principais
         col_sel, col_cli, col_end, col_ped, col_hor, col_bell, col_del = st.columns([0.5, 3, 3, 1.5, 1.5, 0.5, 0.5])
         
         p['selecionado'] = col_sel.checkbox("", value=p.get('selecionado', True), key=f"sel_{p['uid']}")
@@ -462,6 +483,14 @@ if st.session_state.pendentes:
             st.session_state.pendentes.pop(i)
             salvar_pendentes(st.session_state.pendentes)
             st.rerun()
+            
+        # Linha 2: Barra de Pesquisa de Itens (Ocupando a largura quase total)
+        _, col_itens = st.columns([0.5, 9.5])
+        with col_itens:
+            # O multiselect permite pesquisar por nome, código ou qualquer palavra solta
+            p['itens'] = st.multiselect("📦 Itens do Pedido (Pesquise por nome ou código):", options=lista_estoque, default=p.get('itens', []), key=f"itens_{p['uid']}")
+
+        st.divider()
 
     if st.button("🗑️ Limpar Toda a Fila de Pendentes"):
         st.session_state.pendentes = []
@@ -558,6 +587,11 @@ if historico:
                 urg = f" **[URG. {p.get('horario', '')}]**" if p.get('urgente') else ""
                 num = f" (Ped: {p['pedido_num']})" if p.get('pedido_num') else ""
                 st.write(f"-{urg} {p['cliente']}{num}: *{p['endereco']}*")
+                
+                # Mostra os itens também no histórico na tela
+                if p.get('itens'):
+                    for item in p['itens']:
+                        st.write(f"&nbsp;&nbsp;&nbsp;&nbsp;📦 {item}")
             
             col_b1, col_b2, col_b3 = st.columns([2, 2, 2])
             with col_b1:
