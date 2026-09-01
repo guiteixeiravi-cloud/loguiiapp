@@ -51,6 +51,39 @@ def carregar_estoque():
                     if text:
                         for line in text.split('\n'):
                             line = line.strip()
+                            
+                            # Filtro inteligente: Pega o Código (números no início) e a Descrição.
+                            # Ignora tudo que vem depois de "MARCA PADRAO" ou de grandes espaços.
+                            match = re.search(r'^(\d{3,6})\s+(.+?)(?=\s+MARCA PADRAO|\s+MARCA\b|\s{2,})', line, re.IGNORECASE)
+                            
+                            if match:
+                                codigo = match.group(1).strip()
+                                descricao = match.group(2).strip()
+                                
+                                # Monta o item limpo: "3030 - ABRACADEIRA 100MM..."
+                                item_limpo = f"{codigo} - {descricao}"
+                                itens.append(item_limpo)
+                                
+            # Se encontrou os itens, remove duplicatas e organiza em ordem alfabética
+            if itens:
+                return sorted(list(set(itens)))
+        except Exception as e:
+            st.sidebar.error(f"Erro ao ler estoque.pdf: {e}")
+            
+    # Plano B só aparece se o arquivo não existir ou estiver corrompido
+    return ["Exemplo: Fita Adesiva - Cód 101", "Exemplo: Caixa Parda - Cód 102"]
+
+lista_estoque = carregar_estoque()
+    
+    if os.path.exists(caminho_pdf) and PyPDF2:
+        try:
+            with open(caminho_pdf, "rb") as f:
+                reader = PyPDF2.PdfReader(f)
+                for page in reader.pages:
+                    text = page.extract_text()
+                    if text:
+                        for line in text.split('\n'):
+                            line = line.strip()
                             # Só adiciona linhas que tenham letras/números (evita espaços em branco do PDF)
                             if len(line) > 2 and re.search(r'[A-Za-z0-9]', line):
                                 itens.append(line)
