@@ -1,3 +1,4 @@
+import sys
 import re
 import requests
 import time
@@ -14,23 +15,93 @@ from io import BytesIO
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-import sys
-
-# Apontando o caminho do leitor de imagens:
-# Se for Windows (seu PC), usa o caminho do disco C:
-if sys.platform.startswith('win'):
-    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-# Se for Linux (Nuvem do Streamlit), o sistema já sabe onde achar, então não precisa de caminho!
-
-# Configuração da Página
+# Configuração da Página (Deve ser sempre a primeira linha)
 st.set_page_config(page_title="LoGuii - Rotas", layout="wide", page_icon="logo.png")
 
-# Descobre a pasta atual do arquivo
+# Ajuste do Tesseract para rodar tanto no seu Windows quanto no Linux da Nuvem
+if sys.platform.startswith('win'):
+    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
+# Descobre a pasta atual dos arquivos
 diretorio_atual = os.path.dirname(os.path.abspath(__file__))
 caminho_caricatura = os.path.join(diretorio_atual, "caricatura.png")
 caminho_logo = os.path.join(diretorio_atual, "logo.png")
 arquivo_historico = os.path.join(diretorio_atual, "historico_rotas.json")
 arquivo_pendentes = os.path.join(diretorio_atual, "pendentes.json")
+arquivo_usuarios = os.path.join(diretorio_atual, "usuarios.json") # Banco do Login
+
+# --- BANCO DE DADOS DE USUÁRIOS ---
+def carregar_usuarios():
+    if os.path.exists(arquivo_usuarios):
+        try:
+            with open(arquivo_usuarios, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except: pass
+    return {}
+
+def salvar_usuarios(usuarios):
+    with open(arquivo_usuarios, "w", encoding="utf-8") as f:
+        json.dump(usuarios, f, ensure_ascii=False, indent=4)
+
+# --- CONTROLE DE ACESSO (SESSÃO) ---
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+
+# --- TELA DE LOGIN ---
+if not st.session_state.autenticado:
+    # Cria colunas para deixar o login centralizado e bonito
+    col_vazia1, col_login, col_vazia2 = st.columns([1, 2, 1])
+    
+    with col_login:
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        # Exibe a logo da empresa acima do login, se ela existir
+        if os.path.exists(caminho_logo):
+            st.image(caminho_logo, width=250)
+            
+        st.title("🔒 Acesso Restrito - LoGuii")
+        st.markdown("Faça login ou utilize a chave da União Embalagens para criar uma conta.")
+        
+        tab_entrar, tab_criar = st.tabs(["Entrar", "Criar Nova Conta"])
+        
+        usuarios_db = carregar_usuarios()
+        
+        # ABA 1: ENTRAR
+        with tab_entrar:
+            user_login = st.text_input("Usuário")
+            pass_login = st.text_input("Senha", type="password")
+            
+            if st.button("Entrar no Sistema", type="primary", use_container_width=True):
+                if user_login in usuarios_db and usuarios_db[user_login] == pass_login:
+                    st.session_state.autenticado = True
+                    st.rerun() # Recarrega a página para entrar
+                else:
+                    st.error("Usuário ou senha incorretos. Tente novamente.")
+                    
+        # ABA 2: CRIAR CONTA
+        with tab_criar:
+            chave_convite = st.text_input("Chave de Convite (Obrigatório)", type="password")
+            novo_user = st.text_input("Defina um Nome de Usuário")
+            nova_senha = st.text_input("Defina uma Senha", type="password")
+            
+            if st.button("Cadastrar Usuário", type="primary", use_container_width=True):
+                if chave_convite != "Uniaologuii":
+                    st.error("❌ Chave de convite inválida! Solicite a chave correta com a administração.")
+                elif novo_user in usuarios_db:
+                    st.error("❌ Esse usuário já existe. Escolha outro.")
+                elif not novo_user or not nova_senha:
+                    st.error("❌ Preencha todos os campos.")
+                else:
+                    usuarios_db[novo_user] = nova_senha
+                    salvar_usuarios(usuarios_db)
+                    st.success("✅ Conta criada com sucesso! Volte na aba 'Entrar' para acessar o sistema.")
+    
+    # O comando abaixo IMPEDE que o resto do site carregue se não estiver logado
+    st.stop() 
+
+
+# =====================================================================
+# SE O CÓDIGO CHEGOU AQUI, É PORQUE O USUÁRIO FEZ LOGIN COM SUCESSO!
+# =====================================================================
 
 # --- FUNÇÕES DE SALVAMENTO DOS PENDENTES ---
 def salvar_pendentes(lista):
@@ -42,8 +113,7 @@ def carregar_pendentes():
         try:
             with open(arquivo_pendentes, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except:
-            pass
+        except: pass
     return []
 
 # --- FUNÇÃO DA MARCA D'ÁGUA ---
@@ -74,7 +144,7 @@ def aplicar_marca_dagua(image_path):
 
 aplicar_marca_dagua(caminho_caricatura)
 
-# --- CABEÇALHO COM A CARICATURA NO TOPO DIREITO ---
+# --- CABEÇALHO DA PÁGINA PRINCIPAL ---
 col_texto, col_imagem = st.columns([5, 1])
 
 with col_texto:
@@ -85,7 +155,6 @@ with col_imagem:
     if os.path.exists(caminho_caricatura):
         st.image(caminho_caricatura, width=130)
 
-# Inicializar a FILA DE PENDENTES com os dados salvos
 if "pendentes" not in st.session_state:
     st.session_state.pendentes = carregar_pendentes()
 
@@ -105,16 +174,13 @@ def carregar_clientes():
                 df = pd.read_excel(arquivo)
                 df.columns = df.columns.str.strip()
                 
-                if 'Código' in df.columns:
-                    df['Código'] = df['Código'].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
-                if 'Numero' in df.columns:
-                    df['Numero'] = df['Numero'].fillna('').astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
+                if 'Código' in df.columns: df['Código'] = df['Código'].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
+                if 'Numero' in df.columns: df['Numero'] = df['Numero'].fillna('').astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
                 
                 return df, True, arquivo
             except Exception as e:
-                return pd.DataFrame(), False, f"Arquivo encontrado, mas deu erro na leitura: {str(e)}"
-                
-    return pd.DataFrame(), False, "O sistema não encontrou a planilha na mesma pasta do arquivo app.py."
+                return pd.DataFrame(), False, f"Arquivo encontrado, erro na leitura: {str(e)}"
+    return pd.DataFrame(), False, "Planilha não encontrada."
 
 df_clientes, status_ok, msg_erro = carregar_clientes()
 
@@ -125,8 +191,7 @@ def gerenciar_historico(acao='listar', dados=None, idx=None):
         try:
             with open(arquivo_historico, "r", encoding="utf-8") as f:
                 historico = json.load(f)
-        except:
-            pass
+        except: pass
     
     tempo_atual = time.time()
     historico = [r for r in historico if (tempo_atual - r.get("timestamp", 0)) <= 172800]
@@ -141,12 +206,10 @@ def gerenciar_historico(acao='listar', dados=None, idx=None):
             historico.pop(idx)
             with open(arquivo_historico, "w", encoding="utf-8") as f:
                 json.dump(historico, f, ensure_ascii=False, indent=4)
-                
     return historico
 
 # --- INTELIGÊNCIA DE ORDENAÇÃO DE URGÊNCIA ---
 def haversine(lat1, lon1, lat2, lon2):
-    """Calcula a distância em Km entre dois pontos no globo."""
     R = 6371
     dLat = math.radians(lat2 - lat1)
     dLon = math.radians(lon2 - lon1)
@@ -154,23 +217,18 @@ def haversine(lat1, lon1, lat2, lon2):
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
 
 def extrair_minutos(horario_str):
-    """Lê o horário (ex: 14h, 10:30) e converte para minutos do dia."""
-    if not horario_str: return 720 # Padrão 12h
+    if not horario_str: return 720
     try:
         numeros = re.findall(r'\d+', str(horario_str))
-        if len(numeros) >= 2:
-            return int(numeros[0]) * 60 + int(numeros[1])
+        if len(numeros) >= 2: return int(numeros[0]) * 60 + int(numeros[1])
         elif len(numeros) == 1:
             n = numeros[0]
-            if len(n) >= 3:
-                return int(n[:-2]) * 60 + int(n[-2:])
+            if len(n) >= 3: return int(n[:-2]) * 60 + int(n[-2:])
             return int(n) * 60
-    except:
-        pass
+    except: pass
     return 720
 
 def otimizar_rota_com_urgencia(origem_lat, origem_lon, pedidos):
-    """Algoritmo de Roteirização Guloso que respeita as urgências e horários."""
     unvisited = pedidos.copy()
     current_lat, current_lon = float(origem_lat), float(origem_lon)
     rota_ordenada = []
@@ -181,16 +239,11 @@ def otimizar_rota_com_urgencia(origem_lat, origem_lon, pedidos):
         
         for i, p in enumerate(unvisited):
             dist = haversine(current_lat, current_lon, float(p['lat']), float(p['lon']))
-            
             bonus = 0
             if p.get('urgente'):
                 minutos = extrair_minutos(p.get('horario', ''))
-                # Bônus de Urgência: Reduz a distância 'falsa' para o algoritmo puxar essa entrega primeiro
-                # Entregas mais cedo ganham bônus ainda maior (até 18km de vantagem).
                 bonus = 12 + 6 * (1 - (minutos / 1440))
-                
             score = dist - bonus
-            
             if score < best_score:
                 best_score = score
                 best_idx = i
@@ -199,20 +252,17 @@ def otimizar_rota_com_urgencia(origem_lat, origem_lon, pedidos):
         rota_ordenada.append(next_p)
         current_lat = float(next_p['lat'])
         current_lon = float(next_p['lon'])
-        
     return rota_ordenada
 
-# --- LOGO DA EMPRESA NA BARRA LATERAL ---
+# --- MENU LATERAL (SIDEBAR) ---
 if os.path.exists(caminho_logo):
     st.sidebar.image(caminho_logo, use_container_width=True)
     st.sidebar.markdown("<br>", unsafe_allow_html=True) 
 
-# --- BARRA LATERAL: OPÇÕES DE ADIÇÃO ---
 st.sidebar.header("🔍 1. Adicionar à Fila")
 
 if status_ok and not df_clientes.empty:
     colunas_necessarias = ['Código', 'Cliente', 'Endereco', 'Numero']
-    
     if all(col in df_clientes.columns for col in colunas_necessarias):
         opcoes = df_clientes['Código'] + " - " + df_clientes['Cliente']
         cliente_selecionado = st.sidebar.selectbox("Digite o Código ou Nome do Cliente:", options=["Selecione..."] + opcoes.tolist())
@@ -226,7 +276,6 @@ if status_ok and not df_clientes.empty:
                 rua_limpa = rua_bruta.split('-')[0].strip()
                 num = str(dados_cli['Numero']).strip()
                 if num.lower() == 'nan': num = ""
-                    
                 endereco_completo = f"{rua_limpa}, {num}" if num else rua_limpa
                 
                 st.session_state.pendentes.append({
@@ -242,8 +291,6 @@ if status_ok and not df_clientes.empty:
                 st.sidebar.success(f"{dados_cli['Cliente']} adicionado à fila!")
             else:
                 st.sidebar.warning("Selecione um cliente primeiro.")
-    else:
-        st.sidebar.error("A planilha foi encontrada, mas o nome de alguma coluna está incorreto.")
 else:
     st.sidebar.error("Planilha de clientes não encontrada!")
 
@@ -254,10 +301,10 @@ modo_imagem = st.sidebar.radio("Como deseja enviar a imagem?", ["Fazer Upload", 
 imagens_para_processar = []
 
 if modo_imagem == "Fazer Upload":
-    uploaded_files = st.sidebar.file_uploader("Envie a imagem do pedido", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
+    uploaded_files = st.sidebar.file_uploader("Envie a imagem", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
     if uploaded_files: imagens_para_processar.extend(uploaded_files)
 else:
-    foto_camera = st.sidebar.camera_input("📸 Tire a foto do comprovante")
+    foto_camera = st.sidebar.camera_input("📸 Tire a foto")
     if foto_camera: imagens_para_processar.append(foto_camera)
 
 def extrair_dados_imagem(imagem):
@@ -358,7 +405,6 @@ def gerar_pdf(ordem_entregas, nome_motorista):
     y -= 15
     c.setFont("Helvetica", 11)
     c.drawString(50, y, "Endereço: Rua Doutor Ivom Rodrigues Pereira, 5078")
-        
     c.save()
     buffer.seek(0)
     return buffer
@@ -367,14 +413,19 @@ if imagens_para_processar:
     for arq_imagem in imagens_para_processar:
         image = Image.open(arq_imagem)
         file_id = getattr(arq_imagem, "name", f"camera_{time.time()}")
-        
         if not any(p.get("uid") == file_id for p in st.session_state.pendentes):
             dados = extrair_dados_imagem(image)
             dados["uid"] = file_id
             st.session_state.pendentes.append(dados)
             salvar_pendentes(st.session_state.pendentes)
 
-# --- LISTAGEM DE PENDENTES (POOL DE ENTREGAS) ---
+# --- BOTÃO DE SAIR NO MENU LATERAL ---
+st.sidebar.divider()
+if st.sidebar.button("🚪 Sair do Sistema (Logout)"):
+    st.session_state.autenticado = False
+    st.rerun()
+
+# --- LISTAGEM DE PENDENTES ---
 st.subheader("📋 Fila de Pedidos Pendentes")
 st.markdown("Marque apenas os que irão nesta viagem. Clique no 🔕 para marcar como **URGENTE**.")
 
@@ -452,9 +503,7 @@ if st.button("🗺️ Gerar Rota Otimizada", type="primary"):
                 time.sleep(1) 
 
             if len(enderecos_validos) > 0:
-                # Usa a Inteligência em Python no lugar do servidor externo (100x mais rápido e nunca cai)
                 ordem_entregas = otimizar_rota_com_urgencia(lat_o, lon_o, enderecos_validos)
-                
                 st.success("Rota gerada com sucesso! A inteligência do sistema priorizou as entregas urgentes mantendo a melhor eficiência.")
                 
                 st.subheader("📍 Ordem Sugerida de Entregas")
@@ -482,7 +531,6 @@ if st.button("🗺️ Gerar Rota Otimizada", type="primary"):
                     type="primary"
                 )
                 
-                # Remove os itens roteirizados da fila permanentemente
                 st.session_state.pendentes = [p for p in st.session_state.pendentes if not p.get('selecionado', False)]
                 salvar_pendentes(st.session_state.pendentes)
                 
