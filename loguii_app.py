@@ -34,7 +34,6 @@ caminho_caricatura = os.path.join(diretorio_atual, "caricatura.png")
 caminho_logo = os.path.join(diretorio_atual, "logo.png")
 arquivo_historico = os.path.join(diretorio_atual, "historico_rotas.json")
 arquivo_pendentes = os.path.join(diretorio_atual, "pendentes.json")
-arquivo_usuarios = os.path.join(diretorio_atual, "usuarios.json")
 
 # --- LEITURA DO ARQUIVO DE ESTOQUE ---
 @st.cache_data
@@ -69,19 +68,15 @@ def carregar_estoque():
 
 lista_estoque = carregar_estoque()
 
-# --- BANCO DE DADOS DE USUÁRIOS ---
-def carregar_usuarios():
-    if os.path.exists(arquivo_usuarios):
-        try:
-            with open(arquivo_usuarios, "r", encoding="utf-8") as f: return json.load(f)
-        except: pass
-    return {}
+# --- BANCO DE DADOS DE USUÁRIOS BLINDADO ---
+USUARIOS_CADASTRADOS = {
+    "admin": "123456",
+    "expedicao": "loguii2026",
+    "motorista": "uniaologuii"
+}
 
-def salvar_usuarios(usuarios):
-    with open(arquivo_usuarios, "w", encoding="utf-8") as f:
-        json.dump(usuarios, f, ensure_ascii=False, indent=4)
-
-if "autenticado" not in st.session_state: st.session_state.autenticado = False
+if "autenticado" not in st.session_state: 
+    st.session_state.autenticado = False
 
 # --- TELA DE LOGIN ---
 if not st.session_state.autenticado:
@@ -89,33 +84,21 @@ if not st.session_state.autenticado:
     with col_login:
         st.markdown("<br><br>", unsafe_allow_html=True)
         if os.path.exists(caminho_logo): st.image(caminho_logo, width=250)
+        
         st.title("🔒 Acesso Restrito - LoGuii")
-        st.markdown("Faça login ou utilize a chave da União Embalagens para criar uma conta.")
+        st.markdown("Faça o login para acessar o sistema logístico.")
         
-        tab_entrar, tab_criar = st.tabs(["Entrar", "Criar Nova Conta"])
-        usuarios_db = carregar_usuarios()
+        user_login = st.text_input("Usuário")
+        pass_login = st.text_input("Senha", type="password")
         
-        with tab_entrar:
-            user_login = st.text_input("Usuário")
-            pass_login = st.text_input("Senha", type="password")
-            if st.button("Entrar no Sistema", type="primary", use_container_width=True):
-                if user_login in usuarios_db and usuarios_db[user_login] == pass_login:
-                    st.session_state.autenticado = True
-                    st.rerun() 
-                else: st.error("Usuário ou senha incorretos.")
-                    
-        with tab_criar:
-            chave_convite = st.text_input("Chave de Convite (Obrigatório)", type="password")
-            novo_user = st.text_input("Defina um Nome de Usuário")
-            nova_senha = st.text_input("Defina uma Senha", type="password")
-            if st.button("Cadastrar Usuário", type="primary", use_container_width=True):
-                if chave_convite != "Uniaologuii": st.error("❌ Chave de convite inválida!")
-                elif novo_user in usuarios_db: st.error("❌ Esse usuário já existe.")
-                elif not novo_user or not nova_senha: st.error("❌ Preencha todos os campos.")
-                else:
-                    usuarios_db[novo_user] = nova_senha
-                    salvar_usuarios(usuarios_db)
-                    st.success("✅ Conta criada com sucesso! Volte na aba 'Entrar' para acessar o sistema.")
+        if st.button("Entrar no Sistema", type="primary", use_container_width=True):
+            usuario_limpo = user_login.strip().lower()
+            
+            if usuario_limpo in USUARIOS_CADASTRADOS and USUARIOS_CADASTRADOS[usuario_limpo] == pass_login:
+                st.session_state.autenticado = True
+                st.rerun() 
+            else: 
+                st.error("❌ Usuário ou senha incorretos. Verifique e tente novamente.")
     st.stop() 
 
 # --- FUNÇÕES DE SALVAMENTO DOS PENDENTES ---
@@ -523,14 +506,14 @@ if st.button("🗺️ Gerar Rota Otimizada", type="primary"):
                         except: pass
                     historico = [r for r in historico if (time.time() - r.get("timestamp", 0)) <= 172800]
                     
-                    # Salva a rota no histórico com um campo novo para o rastreio
+                    # Salva a rota no histórico com o link de rastreamento
                     historico.insert(0, {
                         "timestamp": time.time(), 
                         "data_formatada": datetime.now().strftime("%d/%m/%Y %H:%M"), 
                         "motorista": nome_motorista or "Não informado", 
                         "entregas": ordem_entregas, 
                         "link_maps": link_maps,
-                        "link_rastreamento": "" # NOVO CAMPO
+                        "link_rastreamento": "" 
                     })
                     with open(arquivo_historico, "w", encoding="utf-8") as f: json.dump(historico, f, ensure_ascii=False, indent=4)
                 else: st.error("Não foram encontrados endereços válidos para criar a rota.")
@@ -567,12 +550,14 @@ if hist:
                     st.markdown(f"<a href='{novo_link}' target='_blank'><button style='width:100%; background-color:#2e7b32; color:white; border:none; padding:6px; border-radius:5px; cursor:pointer;'>📍 Acompanhar Agora</button></a>", unsafe_allow_html=True)
             st.markdown("---")
             
+            # Resumo da rota
             st.markdown(f"[🔗 Abrir Rota no Google Maps]({rota['link_maps']})", unsafe_allow_html=True)
             for p in rota['entregas']:
                 st.write(f"-{f' **[URG. {p.get('horario', '')}]**' if p.get('urgente') else ''} {p['cliente']}: *{p['endereco']}*")
                 if p.get('itens'):
                     for item in p['itens']: st.write(f"&nbsp;&nbsp;&nbsp;&nbsp;📦 {item}")
             
+            # Botões de ação do histórico
             col_b1, col_b2, col_b3 = st.columns([2, 2, 2])
             with col_b1:
                 st.download_button(label="📄 Re-imprimir PDF", data=gerar_pdf(rota['entregas'], rota['motorista']), file_name=f"LoGuii_Hist_{i}.pdf", mime="application/pdf", key=f"dl_hist_{i}")
