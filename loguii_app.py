@@ -282,8 +282,11 @@ else:
 def extrair_dados_imagem(imagem):
     texto = pytesseract.image_to_string(imagem, lang="por")
     texto_cliente = texto[texto.find("Cliente:"):] if "Cliente:" in texto else texto[texto.find("CNPJ/CPF:"):] if "CNPJ/CPF:" in texto else texto
+    
+    # Correção nas Regex da Imagem
     cliente_match = re.search(r"Cliente:\s*\d+\s*-\s*(.*?)(?:-|\n)", texto, re.IGNORECASE) or re.search(r"Cliente:\s*(.*)", texto, re.IGNORECASE)
     cliente = cliente_match.group(1).strip() if cliente_match else "Não identificado"
+    
     linha_endereco_match = re.search(r"Endereço:\s*([^\n]*)", texto_cliente, re.IGNORECASE)
     rua, numero = "", ""
     if linha_endereco_match:
@@ -399,14 +402,20 @@ def gerar_pdf(ordem_entregas, nome_motorista):
     c.drawString(50, altura - 130, "Rua Doutor Ivom Rodrigues Pereira, 5078")
     c.line(50, altura - 145, largura - 50, altura - 145)
     y = altura - 175
+    
     for idx, p in enumerate(ordem_entregas):
         if y < 100:
             c.showPage()
             y = altura - 50
+            
+        # Correção das strings de formatação (Evitando aspas simples dentro de aspas simples)
         prefixo = f"[URGENTE {p.get('horario', '')}] " if p.get('urgente') else ""
+        num_pedido_str = f" | Pedido: {p.get('pedido_num')}" if p.get('pedido_num') else ""
+        
         if p.get('urgente'): c.setFillColorRGB(0.8, 0, 0)
         c.setFont("Helvetica-Bold", 12)
-        c.drawString(50, y, f"[{idx+1}] {prefixo}Cliente: {p['cliente']}{f' | Pedido: {p.get('pedido_num')}' if p.get('pedido_num') else ''}")
+        
+        c.drawString(50, y, f"[{idx+1}] {prefixo}Cliente: {p['cliente']}{num_pedido_str}")
         c.setFillColorRGB(0, 0, 0) 
         c.rect(largura - 70, y - 10, 15, 15)
         y -= 15
@@ -429,6 +438,7 @@ def gerar_pdf(ordem_entregas, nome_motorista):
         y -= 5
         c.line(50, y, largura - 50, y)
         y -= 25
+        
     c.setFont("Helvetica-Bold", 12)
     c.drawString(50, y, "📍 RETORNO: Base União Embalagens")
     y -= 15
@@ -485,8 +495,10 @@ if st.button("🗺️ Gerar Rota Otimizada", type="primary"):
                     ordem_entregas = otimizar_rota_com_urgencia(lat_o, lon_o, enderecos_validos)
                     st.success("Rota gerada com sucesso!")
                     st.subheader("📍 Ordem Sugerida de Entregas")
+                    
                     for idx, p in enumerate(ordem_entregas):
-                        st.markdown(f"**Parada {idx+1}:** {f' **[URG. {p.get('horario', '')}]** ' if p.get('urgente') else ''}{p['cliente']} — *{p['endereco']}*")
+                        urg_text = f" **[URG. {p.get('horario', '')}]** " if p.get('urgente') else ""
+                        st.markdown(f"**Parada {idx+1}:** {urg_text}{p['cliente']} — *{p['endereco']}*")
                     
                     origem_link = "Rua Doutor Ivom Rodrigues Pereira, 5078, Franca, SP".replace(" ", "+")
                     pontos = "|".join([f"{p['endereco']}, Franca, SP".replace(" ", "+") for p in ordem_entregas])
@@ -506,7 +518,6 @@ if st.button("🗺️ Gerar Rota Otimizada", type="primary"):
                         except: pass
                     historico = [r for r in historico if (time.time() - r.get("timestamp", 0)) <= 172800]
                     
-                    # Salva a rota no histórico com o link de rastreamento
                     historico.insert(0, {
                         "timestamp": time.time(), 
                         "data_formatada": datetime.now().strftime("%d/%m/%Y %H:%M"), 
@@ -553,7 +564,9 @@ if hist:
             # Resumo da rota
             st.markdown(f"[🔗 Abrir Rota no Google Maps]({rota['link_maps']})", unsafe_allow_html=True)
             for p in rota['entregas']:
-                st.write(f"-{f' **[URG. {p.get('horario', '')}]**' if p.get('urgente') else ''} {p['cliente']}: *{p['endereco']}*")
+                urg_text = f" **[URG. {p.get('horario', '')}]**" if p.get('urgente') else ""
+                st.write(f"-{urg_text} {p['cliente']}: *{p['endereco']}*")
+                
                 if p.get('itens'):
                     for item in p['itens']: st.write(f"&nbsp;&nbsp;&nbsp;&nbsp;📦 {item}")
             
