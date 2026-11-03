@@ -156,7 +156,7 @@ with col_imagem:
 if "pendentes" not in st.session_state:
     st.session_state.pendentes = carregar_pendentes()
 
-# --- INTELIGÊNCIA GEOGRÁFICA (HAVERSINE & GEOCODIFICAÇÃO AUTOMÁTICA) ---
+# --- INTELIGÊNCIA GEOGRÁFICA (HAVERSINE & GEOCODIFICAÇÃO FORÇADA) ---
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371
     dLat = math.radians(lat2 - lat1)
@@ -170,16 +170,23 @@ def geocodificar(endereco):
     params = {'q': endereco, 'format': 'json', 'limit': 1}
     try:
         res = requests.get(url, headers=headers, params=params, timeout=5)
-        if res.json(): return float(res.json()[0]['lat']), float(res.json()[0]['lon'])
-    except: pass
+        dados = res.json()
+        if dados:
+            return float(dados[0]['lat']), float(dados[0]['lon'])
+    except: 
+        pass
     
     if "," in endereco:
         rua = endereco.split(",")[0].strip()
-        if "Franca" not in rua: rua = f"{rua}, Franca, SP, Brasil"
+        if "Franca" not in rua: 
+            rua = f"{rua}, Franca, SP, Brasil"
         try:
             res = requests.get(url, headers=headers, params={'q': rua, 'format': 'json', 'limit': 1}, timeout=5)
-            if res.json(): return float(res.json()[0]['lat']), float(res.json()[0]['lon'])
-        except: pass
+            dados = res.json()
+            if dados:
+                return float(dados[0]['lat']), float(dados[0]['lon'])
+        except: 
+            pass
     return None, None
 
 def atualizar_agrupamentos(pendentes):
@@ -190,7 +197,7 @@ def atualizar_agrupamentos(pendentes):
         if not p.get('lat') or not p.get('lon'):
             lat, lon = geocodificar(f"{p['endereco']}, Franca - SP, Brasil")
             if lat and lon:
-                p['lat'], p['lon'] = lat, lon
+                p['lat'], p['lon'] = float(lat), float(lon)
             time.sleep(0.3)
 
     adj = {i: [] for i in range(n)}
@@ -270,14 +277,14 @@ if status_ok and not df_clientes.empty:
         cliente_selecionado = st.sidebar.selectbox("Digite o Código ou Nome do Cliente:", options=["Selecione..."] + opcoes.tolist())
         if st.sidebar.button("➕ Enviar para Pendentes", type="primary"):
             if cliente_selecionado != "Selecione...":
-                with st.spinner("Localizando endereço no mapa e agrupando..."):
+                with st.spinner("Localizando endereço no mapa..."):
                     codigo_busca = cliente_selecionado.split(" - ")[0]
                     dados_cli = df_clientes[df_clientes['Código'] == codigo_busca].iloc[0]
                     rua = str(dados_cli['Endereco']).strip().split('-')[0].strip()
                     num = str(dados_cli['Numero']).strip()
                     endereco_completo = f"{rua}, {num}" if num.lower() != 'nan' and num else rua
                     
-                    # Busca coordenada na hora para já alimentar o mapa
+                    # Busca coordenada na hora e converte estritamente para float
                     lat, lon = geocodificar(f"{endereco_completo}, Franca - SP, Brasil")
                     
                     st.session_state.pendentes.append({
@@ -286,7 +293,8 @@ if status_ok and not df_clientes.empty:
                         "endereco": endereco_completo,
                         "pedido_num": "", "urgente": False, "horario": "",
                         "selecionado": True, "itens": [], "grupo": "Calculando...", "fixo": False,
-                        "lat": lat, "lon": lon
+                        "lat": float(lat) if lat else None, 
+                        "lon": float(lon) if lon else None
                     })
                     atualizar_agrupamentos(st.session_state.pendentes)
                     salvar_pendentes(st.session_state.pendentes)
@@ -328,10 +336,17 @@ def extrair_dados_imagem(imagem):
     end_completo = f"{rua}, {numero}" if (rua and numero) else rua if rua else "Endereço não identificado"
     lat, lon = geocodificar(f"{end_completo}, Franca - SP, Brasil") if end_completo != "Endereço não identificado" else (None, None)
     
-    return {"cliente": cliente, "endereco": end_completo, "pedido_num": "", "urgente": False, "horario": "", "selecionado": True, "itens": [], "grupo": "Calculando...", "fixo": False, "lat": lat, "lon": lon}
+    return {
+        "cliente": cliente, 
+        "endereco": end_completo, 
+        "pedido_num": "", "urgente": False, "horario": "", 
+        "selecionado": True, "itens": [], "grupo": "Calculando...", "fixo": False, 
+        "lat": float(lat) if lat else None, 
+        "lon": float(lon) if lon else None
+    }
 
 if imagens_para_processar:
-    with st.spinner("Lendo imagens e mapeando no radar..."):
+    with st.spinner("Lendo imagens e mapeando..."):
         for arq_imagem in imagens_para_processar:
             image = Image.open(arq_imagem)
             file_id = getattr(arq_imagem, "name", f"camera_{time.time()}")
@@ -350,13 +365,12 @@ if st.sidebar.button("🚪 Sair do Sistema (Logout)"):
         del st.query_params["auth"]
     st.rerun()
 
-# --- LISTAGEM DE PENDENTES E MAPA IMEDIATO ---
+# --- LISTAGEM DE PENDENTES E MAPA IMEDIATO ROBUSTO ---
 st.subheader("📋 Fila de Pedidos Pendentes")
-st.markdown("Pedidos distantes até 7km são agrupados automaticamente. O mapa é atualizado instantaneamente a cada inclusão.")
+st.markdown("Pedidos distantes até 7km são agrupados automaticamente. O mapa é atualizado instantaneamente.")
 
 st.session_state.pendentes.sort(key=lambda x: (x.get('grupo', ''), not x.get('urgente', False)))
 
-# Exibe o mapa logo acima se houver coordenadas válidas
 if st.session_state.pendentes:
     dados_mapa = []
     for p in st.session_state.pendentes:
@@ -367,6 +381,8 @@ if st.session_state.pendentes:
         df_mapa = pd.DataFrame(dados_mapa)
         with st.expander("📍 Visualizar Mapa de Entregas em Tempo Real", expanded=True):
             st.map(df_mapa)
+    else:
+        st.info("ℹ️ Nenhum ponto geográfico válido encontrado para exibir no mapa ainda. Verifique se os endereços possuem rua e número corretos.")
 
 if st.session_state.pendentes:
     c_sel, c_grp, c_cli, c_end, c_ped, c_hor, c_bell, c_del = st.columns([0.5, 1.5, 2.5, 3, 1.5, 1, 0.5, 0.5])
