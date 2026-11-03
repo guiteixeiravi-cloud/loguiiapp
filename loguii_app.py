@@ -79,8 +79,13 @@ USUARIOS_CADASTRADOS = {
     "motorista": "uniaologuii"
 }
 
+# --- SISTEMA DE PERSISTÊNCIA DE LOGIN (SOBREVIVE AO F5) ---
 if "autenticado" not in st.session_state: 
-    st.session_state.autenticado = False
+    # Verifica se a URL carrega o crachá virtual de autenticação
+    if hasattr(st, "query_params") and st.query_params.get("auth") == "loguii_ok":
+        st.session_state.autenticado = True
+    else:
+        st.session_state.autenticado = False
 
 # --- TELA DE LOGIN ---
 if not st.session_state.autenticado:
@@ -101,6 +106,9 @@ if not st.session_state.autenticado:
             
             if usuario_limpo in USUARIOS_CADASTRADOS and USUARIOS_CADASTRADOS[usuario_limpo] == pass_login:
                 st.session_state.autenticado = True
+                # Insere o crachá na URL para segurar o login no F5
+                if hasattr(st, "query_params"):
+                    st.query_params["auth"] = "loguii_ok"
                 st.rerun() 
             else: 
                 st.error("❌ Usuário ou senha incorretos. Verifique e tente novamente.")
@@ -333,6 +341,9 @@ if imagens_para_processar:
 st.sidebar.divider()
 if st.sidebar.button("🚪 Sair do Sistema (Logout)"):
     st.session_state.autenticado = False
+    # Retira o crachá da URL para garantir que desconecte
+    if hasattr(st, "query_params") and "auth" in st.query_params:
+        del st.query_params["auth"]
     st.rerun()
 
 # --- LISTAGEM DE PENDENTES E MAPA INTERATIVO ---
