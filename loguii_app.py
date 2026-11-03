@@ -11,7 +11,6 @@ import streamlit as st
 import pandas as pd
 from PIL import Image
 import pytesseract
-import pydeck as pdk
 from io import BytesIO
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
@@ -81,7 +80,6 @@ USUARIOS_CADASTRADOS = {
 
 # --- SISTEMA DE PERSISTÊNCIA DE LOGIN (SOBREVIVE AO F5) ---
 if "autenticado" not in st.session_state: 
-    # Verifica se a URL carrega o crachá virtual de autenticação
     if hasattr(st, "query_params") and st.query_params.get("auth") == "loguii_ok":
         st.session_state.autenticado = True
     else:
@@ -106,7 +104,6 @@ if not st.session_state.autenticado:
             
             if usuario_limpo in USUARIOS_CADASTRADOS and USUARIOS_CADASTRADOS[usuario_limpo] == pass_login:
                 st.session_state.autenticado = True
-                # Insere o crachá na URL para segurar o login no F5
                 if hasattr(st, "query_params"):
                     st.query_params["auth"] = "loguii_ok"
                 st.rerun() 
@@ -341,12 +338,11 @@ if imagens_para_processar:
 st.sidebar.divider()
 if st.sidebar.button("🚪 Sair do Sistema (Logout)"):
     st.session_state.autenticado = False
-    # Retira o crachá da URL para garantir que desconecte
     if hasattr(st, "query_params") and "auth" in st.query_params:
         del st.query_params["auth"]
     st.rerun()
 
-# --- LISTAGEM DE PENDENTES E MAPA INTERATIVO ---
+# --- LISTAGEM DE PENDENTES E MAPA RÁPIDO ---
 st.subheader("📋 Fila de Pedidos Pendentes")
 st.markdown("Pedidos distantes até 7km são agrupados automaticamente. Digite um nome no campo Grupo para fixá-lo manualmente.")
 
@@ -356,37 +352,12 @@ if st.session_state.pendentes:
     dados_mapa = []
     for p in st.session_state.pendentes:
         if p.get('lat') and p.get('lon'):
-            dados_mapa.append({
-                "lat": float(p['lat']), 
-                "lon": float(p['lon']),
-                "Cliente": p.get("cliente", "Desconhecido"),
-                "Endereco": p.get("endereco", "Não informado"),
-                "Grupo": p.get("grupo", "Sem Grupo")
-            })
+            dados_mapa.append({"lat": float(p['lat']), "lon": float(p['lon'])})
             
     if dados_mapa:
         df_mapa = pd.DataFrame(dados_mapa)
-        with st.expander("📍 Visualizar Mapa Interativo de Entregas", expanded=True):
-            layer = pdk.Layer(
-                'ScatterplotLayer',
-                data=df_mapa,
-                get_position='[lon, lat]',
-                get_color='[200, 30, 0, 160]',
-                get_radius=150,
-                pickable=True
-            )
-            view_state = pdk.ViewState(
-                latitude=df_mapa['lat'].mean(),
-                longitude=df_mapa['lon'].mean(),
-                zoom=12,
-                pitch=0
-            )
-            r = pdk.Deck(
-                layers=[layer],
-                initial_view_state=view_state,
-                tooltip={"text": "Cliente: {Cliente}\nEndereço: {Endereco}\nGrupo: {Grupo}"}
-            )
-            st.pydeck_chart(r)
+        with st.expander("📍 Visualizar Mapa de Entregas", expanded=True):
+            st.map(df_mapa)
 
 if st.session_state.pendentes:
     c_sel, c_grp, c_cli, c_end, c_ped, c_hor, c_bell, c_del = st.columns([0.5, 1.5, 2.5, 3, 1.5, 1, 0.5, 0.5])
