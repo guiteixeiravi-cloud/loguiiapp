@@ -339,6 +339,19 @@ st.markdown("Pedidos distantes até 7km são agrupados automaticamente. Digite u
 
 st.session_state.pendentes.sort(key=lambda x: (x.get('grupo', ''), not x.get('urgente', False)))
 
+# --- NOVO: MAPA DEMONSTRATIVO DE ENTREGAS PENDENTES ---
+if st.session_state.pendentes:
+    dados_mapa = []
+    for p in st.session_state.pendentes:
+        if p.get('lat') and p.get('lon'):
+            dados_mapa.append({"lat": float(p['lat']), "lon": float(p['lon'])})
+            
+    if dados_mapa:
+        df_mapa = pd.DataFrame(dados_mapa)
+        with st.expander("📍 Visualizar Mapa de Entregas", expanded=True):
+            st.map(df_mapa)
+# ------------------------------------------------------
+
 if st.session_state.pendentes:
     c_sel, c_grp, c_cli, c_end, c_ped, c_hor, c_bell, c_del = st.columns([0.5, 1.5, 2.5, 3, 1.5, 1, 0.5, 0.5])
     c_grp.markdown("**Grupo (7km)**")
@@ -430,211 +443,4 @@ def gerar_pdf(ordem_entregas, nome_motorista):
     y = altura - 175
     
     for idx, p in enumerate(ordem_entregas):
-        if y < 100:
-            c.showPage()
-            y = altura - 50
-            
-        prefixo = f"[URGENTE {p.get('horario', '')}] " if p.get('urgente') else ""
-        num_pedido_str = f" | Pedido: {p.get('pedido_num')}" if p.get('pedido_num') else ""
-        
-        if p.get('urgente'):
-            c.setFillColorRGB(0.8, 0, 0)
-            
-        c.setFont("Helvetica-Bold", 12)
-        
-        c.drawString(50, y, f"[{idx+1}] {prefixo}Cliente: {p['cliente']}{num_pedido_str}")
-        c.setFillColorRGB(0, 0, 0) 
-        c.rect(largura - 70, y - 10, 15, 15)
-        y -= 15
-        
-        c.setFont("Helvetica", 11)
-        c.drawString(50, y, f"Endereço: {p['endereco']}")
-        y -= 15
-        
-        if p.get('itens'):
-            y -= 5
-            c.setFont("Helvetica-Bold", 10)
-            c.drawString(50, y, "Itens a Carregar:")
-            y -= 15
-            c.setFont("Helvetica", 10)
-            for item in p['itens']:
-                if y < 50:
-                    c.showPage()
-                    y = altura - 50
-                c.rect(50, y, 10, 10) 
-                c.drawString(65, y + 2, item[:85] + "..." if len(item) > 85 else item)
-                y -= 15
-        y -= 5
-        c.line(50, y, largura - 50, y)
-        y -= 25
-        
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(50, y, "📍 RETORNO: Base União Embalagens")
-    y -= 15
-    c.setFont("Helvetica", 11)
-    c.drawString(50, y, "Endereço: Rua Doutor Ivom Rodrigues Pereira, 5078")
-    c.save()
-    buffer.seek(0)
-    return buffer
-
-def extrair_minutos(horario_str):
-    if not horario_str: return 720
-    try:
-        numeros = re.findall(r'\d+', str(horario_str))
-        if len(numeros) >= 2: return int(numeros[0]) * 60 + int(numeros[1])
-        elif len(numeros) == 1:
-            n = numeros[0]
-            if len(n) >= 3: return int(n[:-2]) * 60 + int(n[-2:])
-            return int(n) * 60
-    except: pass
-    return 720
-
-def otimizar_rota_com_urgencia(origem_lat, origem_lon, pedidos):
-    unvisited = pedidos.copy()
-    current_lat, current_lon = float(origem_lat), float(origem_lon)
-    rota_ordenada = []
-    while unvisited:
-        best_score = float('inf')
-        best_idx = -1
-        for i, p in enumerate(unvisited):
-            dist = haversine(current_lat, current_lon, float(p['lat']), float(p['lon']))
-            bonus = 12 + 6 * (1 - (extrair_minutos(p.get('horario', '')) / 1440)) if p.get('urgente') else 0
-            if (dist - bonus) < best_score:
-                best_score = (dist - bonus)
-                best_idx = i
-        next_p = unvisited.pop(best_idx)
-        rota_ordenada.append(next_p)
-        current_lat, current_lon = float(next_p['lat']), float(next_p['lon'])
-    return rota_ordenada
-
-# --- OTIMIZAÇÃO E GERAÇÃO DA ROTA ---
-st.subheader("🗺️ Otimização e Impressão")
-nome_motorista = st.text_input("👨‍✈️ Nome do Motorista (Opcional):", placeholder="Ex: Roberto")
-pedidos_selecionados = [p for p in st.session_state.pendentes if p.get('selecionado', True)]
-
-if st.button("🗺️ Gerar Rota Otimizada", type="primary"):
-    if not pedidos_selecionados:
-        st.warning("Selecione pelo menos um endereço na fila para gerar a rota.")
-    else:
-        with st.spinner("Calculando rotas otimizadas com inteligência de urgência..."):
-            lat_o, lon_o = geocodificar("Rua Doutor Ivom Rodrigues Pereira, 5078, Franca, SP, Brasil")
-            if not (lat_o and lon_o):
-                st.error("Erro ao localizar endereço base.")
-            else:
-                enderecos_validos = [p for p in pedidos_selecionados if p.get('lat') and p.get('lon')]
-                if enderecos_validos:
-                    ordem_entregas = otimizar_rota_com_urgencia(lat_o, lon_o, enderecos_validos)
-                    st.success("Rota gerada com sucesso!")
-                    st.subheader("📍 Ordem Sugerida de Entregas")
-                    
-                    for idx, p in enumerate(ordem_entregas):
-                        urg_text = f" **[URG. {p.get('horario', '')}]** " if p.get('urgente') else ""
-                        st.markdown(f"**Parada {idx+1}:** {urg_text}{p['cliente']} — *{p['endereco']}*")
-                    
-                    origem_link = "Rua Doutor Ivom Rodrigues Pereira, 5078, Franca, SP".replace(" ", "+")
-                    pontos = "|".join([f"{p['endereco']}, Franca, SP".replace(" ", "+") for p in ordem_entregas])
-                    link_maps = f"https://www.google.com/maps/dir/?api=1&origin={origem_link}&destination={origem_link}&waypoints={pontos}"
-                    
-                    st.markdown(f"[🔗 Abrir Rota no Google Maps]({link_maps})", unsafe_allow_html=True)
-                    
-                    st.divider()
-                    pdf_arquivo = gerar_pdf(ordem_entregas, nome_motorista)
-                    nome_arquivo = f"LoGuii_Rota_{datetime.now().strftime('%d%m%Y_%H%M')}.pdf"
-                    
-                    st.download_button(label="📄 Baixar PDF com Checklist da Rota", data=pdf_arquivo, file_name=nome_arquivo, mime="application/pdf", type="primary")
-                    
-                    st.session_state.pendentes = [p for p in st.session_state.pendentes if not p.get('selecionado', False)]
-                    salvar_pendentes(st.session_state.pendentes)
-                    
-                    historico = []
-                    if os.path.exists(arquivo_historico):
-                        try:
-                            with open(arquivo_historico, "r", encoding="utf-8") as f:
-                                historico = json.load(f)
-                        except:
-                            pass
-                    
-                    historico = [r for r in historico if (time.time() - r.get("timestamp", 0)) <= 172800]
-                    
-                    historico.insert(0, {
-                        "timestamp": time.time(), 
-                        "data_formatada": datetime.now().strftime("%d/%m/%Y %H:%M"), 
-                        "motorista": nome_motorista or "Não informado", 
-                        "entregas": ordem_entregas, 
-                        "link_maps": link_maps,
-                        "link_rastreamento": "" 
-                    })
-                    
-                    with open(arquivo_historico, "w", encoding="utf-8") as f:
-                        json.dump(historico, f, ensure_ascii=False, indent=4)
-                else:
-                    st.error("Não foram encontrados endereços válidos para criar a rota.")
-
-# --- HISTÓRICO DE ROTAS E RASTREAMENTO AO VIVO ---
-st.divider()
-st.subheader("🕒 Histórico de Rotas e Rastreamento (Últimas 48h)")
-hist = []
-if os.path.exists(arquivo_historico):
-    try:
-        with open(arquivo_historico, "r", encoding="utf-8") as f:
-            hist = json.load(f)
-    except:
-        pass
-        
-hist = [r for r in hist if (time.time() - r.get("timestamp", 0)) <= 172800]
-
-if hist:
-    for i, rota in enumerate(hist):
-        with st.expander(f"🛣️ Rota de {rota['data_formatada']} - Motorista: {rota['motorista']} ({len(rota['entregas'])} entregas)"):
-            
-            st.markdown("---")
-            st.markdown("**📡 Rastreamento em Tempo Real**")
-            col_link, col_btn_rastreio = st.columns([4, 2])
-            
-            link_atual = rota.get('link_rastreamento', '')
-            with col_link:
-                novo_link = st.text_input("Cole o link do Maps ou WhatsApp aqui:", value=link_atual, key=f"link_rastreio_{i}", label_visibility="collapsed", placeholder="Cole o link de rastreamento ao vivo aqui...")
-            
-            with col_btn_rastreio:
-                if novo_link != link_atual:
-                    hist[i]['link_rastreamento'] = novo_link
-                    with open(arquivo_historico, "w", encoding="utf-8") as f:
-                        json.dump(hist, f, ensure_ascii=False, indent=4)
-                    st.rerun()
-                if novo_link:
-                    st.markdown(f"<a href='{novo_link}' target='_blank'><button style='width:100%; background-color:#2e7b32; color:white; border:none; padding:6px; border-radius:5px; cursor:pointer;'>📍 Acompanhar Agora</button></a>", unsafe_allow_html=True)
-            st.markdown("---")
-            
-            st.markdown(f"[🔗 Abrir Rota no Google Maps]({rota['link_maps']})", unsafe_allow_html=True)
-            for p in rota['entregas']:
-                urg_text = f" **[URG. {p.get('horario', '')}]**" if p.get('urgente') else ""
-                st.write(f"-{urg_text} {p['cliente']}: *{p['endereco']}*")
-                
-                if p.get('itens'):
-                    for item in p['itens']:
-                        st.write(f"&nbsp;&nbsp;&nbsp;&nbsp;📦 {item}")
-            
-            col_b1, col_b2, col_b3 = st.columns([2, 2, 2])
-            with col_b1:
-                st.download_button(label="📄 Re-imprimir PDF", data=gerar_pdf(rota['entregas'], rota['motorista']), file_name=f"LoGuii_Hist_{i}.pdf", mime="application/pdf", key=f"dl_hist_{i}")
-            with col_b2:
-                if st.button("✏️ Editar (Devolver p/ Fila)", key=f"edit_hist_{i}"):
-                    for p_hist in rota['entregas']:
-                        p_hist['uid'] = f"hist_{time.time()}_{p_hist['cliente']}"
-                        p_hist['selecionado'] = True
-                        p_hist['fixo'] = False
-                        st.session_state.pendentes.append(p_hist)
-                    atualizar_agrupamentos(st.session_state.pendentes)
-                    salvar_pendentes(st.session_state.pendentes)
-                    hist.pop(i)
-                    with open(arquivo_historico, "w", encoding="utf-8") as f:
-                        json.dump(hist, f, ensure_ascii=False, indent=4)
-                    st.rerun()
-            with col_b3:
-                if st.button("🗑️ Excluir Rota", key=f"del_hist_{i}", type="secondary"):
-                    hist.pop(i)
-                    with open(arquivo_historico, "w", encoding="utf-8") as f:
-                        json.dump(hist, f, ensure_ascii=False, indent=4)
-                    st.rerun()
-else:
-    st.info("Nenhuma rota salva ainda.")
+        if y < 10
