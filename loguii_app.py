@@ -11,6 +11,7 @@ import streamlit as st
 import pandas as pd
 from PIL import Image
 import pytesseract
+import pydeck as pdk
 from io import BytesIO
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
@@ -156,7 +157,7 @@ with col_imagem:
 if "pendentes" not in st.session_state:
     st.session_state.pendentes = carregar_pendentes()
 
-# --- INTELIGÊNCIA GEOGRÁFICA (HAVERSINE & GEOCODIFICAÇÃO FORÇADA) ---
+# --- INTELIGÊNCIA GEOGRÁFICA (HAVERSINE & GEOCODIFICAÇÃO ROBUSTA) ---
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371
     dLat = math.radians(lat2 - lat1)
@@ -167,26 +168,30 @@ def haversine(lat1, lon1, lat2, lon2):
 def geocodificar(endereco):
     url = "https://nominatim.openstreetmap.org/search"
     headers = {'User-Agent': 'LoGuiiApp/1.0'}
-    params = {'q': endereco, 'format': 'json', 'limit': 1}
+    
+    # Tenta buscar o endereço completo com Franca
+    query = endereco if "Franca" in endereco else f"{endereco}, Franca, SP, Brasil"
+    params = {'q': query, 'format': 'json', 'limit': 1}
+    
     try:
-        res = requests.get(url, headers=headers, params=params, timeout=5)
+        res = requests.get(url, headers=headers, params=params, timeout=6)
         dados = res.json()
         if dados:
             return float(dados[0]['lat']), float(dados[0]['lon'])
     except: 
         pass
     
+    # Fallback: tenta buscar apenas pelo nome da rua se falhar o número exato
     if "," in endereco:
         rua = endereco.split(",")[0].strip()
-        if "Franca" not in rua: 
-            rua = f"{rua}, Franca, SP, Brasil"
         try:
-            res = requests.get(url, headers=headers, params={'q': rua, 'format': 'json', 'limit': 1}, timeout=5)
+            res = requests.get(url, headers=headers, params={'q': f"{rua}, Franca, SP, Brasil", 'format': 'json', 'limit': 1}, timeout=6)
             dados = res.json()
             if dados:
                 return float(dados[0]['lat']), float(dados[0]['lon'])
         except: 
             pass
+            
     return None, None
 
 def atualizar_agrupamentos(pendentes):
@@ -195,7 +200,7 @@ def atualizar_agrupamentos(pendentes):
 
     for p in pendentes:
         if not p.get('lat') or not p.get('lon'):
-            lat, lon = geocodificar(f"{p['endereco']}, Franca - SP, Brasil")
+            lat, lon = geocodificar(p['endereco'])
             if lat and lon:
                 p['lat'], p['lon'] = float(lat), float(lon)
             time.sleep(0.3)
@@ -284,8 +289,7 @@ if status_ok and not df_clientes.empty:
                     num = str(dados_cli['Numero']).strip()
                     endereco_completo = f"{rua}, {num}" if num.lower() != 'nan' and num else rua
                     
-                    # Busca coordenada na hora e converte estritamente para float
-                    lat, lon = geocodificar(f"{endereco_completo}, Franca - SP, Brasil")
+                    lat, lon = geocodificar(endereco_completo)
                     
                     st.session_state.pendentes.append({
                         "uid": f"bd_{codigo_busca}_{time.time()}",
@@ -334,15 +338,13 @@ def extrair_dados_imagem(imagem):
         numero = numero_match.group(1).strip() if numero_match else ""
     
     end_completo = f"{rua}, {numero}" if (rua and numero) else rua if rua else "Endereço não identificado"
-    lat, lon = geocodificar(f"{end_completo}, Franca - SP, Brasil") if end_completo != "Endereço não identificado" else (None, None)
+    lat, lon = geocodificar(end_completo) if end_completo != "Endereço não identificado" else (None, None)
     
     return {
-        "cliente": cliente, 
-        "endereco": end_completo, 
+        "cliente": cliente, "endereco": end_completo, 
         "pedido_num": "", "urgente": False, "horario": "", 
         "selecionado": True, "itens": [], "grupo": "Calculando...", "fixo": False, 
-        "lat": float(lat) if lat else None, 
-        "lon": float(lon) if lon else None
+        "lat": float(lat) if lat else None, "lon": float(lon) if lon else None
     }
 
 if imagens_para_processar:
@@ -365,9 +367,9 @@ if st.sidebar.button("🚪 Sair do Sistema (Logout)"):
         del st.query_params["auth"]
     st.rerun()
 
-# --- LISTAGEM DE PENDENTES E MAPA IMEDIATO ROBUSTO ---
+# --- LISTAGEM DE PENDENTES E MAPA PYDECK ROBUSTO ---
 st.subheader("📋 Fila de Pedidos Pendentes")
-st.markdown("Pedidos distantes até 7km são agrupados automaticamente. O mapa é atualizado instantaneamente.")
+st.markdown("Pedidos distantes até 7km são agrupados automaticamente. O mapa interativo exibe todos os pontos localizados.")
 
 st.session_state.pendentes.sort(key=lambda x: (x.get('grupo', ''), not x.get('urgente', False)))
 
@@ -375,12 +377,37 @@ if st.session_state.pendentes:
     dados_mapa = []
     for p in st.session_state.pendentes:
         if p.get('lat') and p.get('lon'):
-            dados_mapa.append({"lat": float(p['lat']), "lon": float(p['lon'])})
+            dados_mapa.append({
+                "lat": float(p['lat']), 
+                "lon": float(p['lon']),
+                "Cliente": p.get("cliente", "Desconhecido"),
+                "Endereco": p.get("endereco", "Não informado"),
+                "Grupo": p.get("grupo", "Sem Grupo")
+            })
             
     if dados_mapa:
         df_mapa = pd.DataFrame(dados_mapa)
-        with st.expander("📍 Visualizar Mapa de Entregas em Tempo Real", expanded=True):
-            st.map(df_mapa)
+        with st.expander("📍 Visualizar Mapa Interativo de Entregas", expanded=True):
+            layer = pdk.Layer(
+                'ScatterplotLayer',
+                data=df_mapa,
+                get_position='[lon, lat]',
+                get_color='[200, 30, 0, 180]',
+                get_radius=180,
+                pickable=True
+            )
+            view_state = pdk.ViewState(
+                latitude=df_mapa['lat'].mean(),
+                longitude=df_mapa['lon'].mean(),
+                zoom=13,
+                pitch=0
+            )
+            r = pdk.Deck(
+                layers=[layer],
+                initial_view_state=view_state,
+                tooltip={"text": "Cliente: {Cliente}\nEndereço: {Endereco}\nGrupo: {Grupo}"}
+            )
+            st.pydeck_chart(r)
     else:
         st.info("ℹ️ Nenhum ponto geográfico válido encontrado para exibir no mapa ainda. Verifique se os endereços possuem rua e número corretos.")
 
