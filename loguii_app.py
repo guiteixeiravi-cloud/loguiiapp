@@ -157,7 +157,7 @@ with col_imagem:
 if "pendentes" not in st.session_state:
     st.session_state.pendentes = carregar_pendentes()
 
-# --- INTELIGÊNCIA GEOGRÁFICA (HAVERSINE & GEOCODIFICAÇÃO ROBUSTA) ---
+# --- INTELIGÊNCIA GEOGRÁFICA COM CACHE DE PERFORMANCE ---
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371
     dLat = math.radians(lat2 - lat1)
@@ -165,27 +165,24 @@ def haversine(lat1, lon1, lat2, lon2):
     a = math.sin(dLat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dLon/2)**2
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
 
+@st.cache_data(show_spinner=False, ttl=86400)
 def geocodificar(endereco):
     url = "https://nominatim.openstreetmap.org/search"
     headers = {'User-Agent': 'LoGuiiApp/1.0'}
-    
-    # Tenta buscar o endereço completo com Franca
     query = endereco if "Franca" in endereco else f"{endereco}, Franca, SP, Brasil"
     params = {'q': query, 'format': 'json', 'limit': 1}
-    
     try:
-        res = requests.get(url, headers=headers, params=params, timeout=6)
+        res = requests.get(url, headers=headers, params=params, timeout=4)
         dados = res.json()
         if dados:
             return float(dados[0]['lat']), float(dados[0]['lon'])
     except: 
         pass
     
-    # Fallback: tenta buscar apenas pelo nome da rua se falhar o número exato
     if "," in endereco:
         rua = endereco.split(",")[0].strip()
         try:
-            res = requests.get(url, headers=headers, params={'q': f"{rua}, Franca, SP, Brasil", 'format': 'json', 'limit': 1}, timeout=6)
+            res = requests.get(url, headers=headers, params={'q': f"{rua}, Franca, SP, Brasil", 'format': 'json', 'limit': 1}, timeout=4)
             dados = res.json()
             if dados:
                 return float(dados[0]['lat']), float(dados[0]['lon'])
@@ -203,7 +200,6 @@ def atualizar_agrupamentos(pendentes):
             lat, lon = geocodificar(p['endereco'])
             if lat and lon:
                 p['lat'], p['lon'] = float(lat), float(lon)
-            time.sleep(0.3)
 
     adj = {i: [] for i in range(n)}
     for i in range(n):
@@ -282,7 +278,7 @@ if status_ok and not df_clientes.empty:
         cliente_selecionado = st.sidebar.selectbox("Digite o Código ou Nome do Cliente:", options=["Selecione..."] + opcoes.tolist())
         if st.sidebar.button("➕ Enviar para Pendentes", type="primary"):
             if cliente_selecionado != "Selecione...":
-                with st.spinner("Localizando endereço no mapa..."):
+                with st.spinner("Adicionando e mapeando endereço..."):
                     codigo_busca = cliente_selecionado.split(" - ")[0]
                     dados_cli = df_clientes[df_clientes['Código'] == codigo_busca].iloc[0]
                     rua = str(dados_cli['Endereco']).strip().split('-')[0].strip()
@@ -367,7 +363,7 @@ if st.sidebar.button("🚪 Sair do Sistema (Logout)"):
         del st.query_params["auth"]
     st.rerun()
 
-# --- LISTAGEM DE PENDENTES E MAPA PYDECK ROBUSTO ---
+# --- LISTAGEM DE PENDENTES E MAPA PYDECK OTIMIZADO ---
 st.subheader("📋 Fila de Pedidos Pendentes")
 st.markdown("Pedidos distantes até 7km são agrupados automaticamente. O mapa interativo exibe todos os pontos localizados.")
 
@@ -409,7 +405,7 @@ if st.session_state.pendentes:
             )
             st.pydeck_chart(r)
     else:
-        st.info("ℹ️ Nenhum ponto geográfico válido encontrado para exibir no mapa ainda. Verifique se os endereços possuem rua e número corretos.")
+        st.info("ℹ️ Nenhum ponto geográfico válido encontrado para exibir no mapa ainda.")
 
 if st.session_state.pendentes:
     c_sel, c_grp, c_cli, c_end, c_ped, c_hor, c_bell, c_del = st.columns([0.5, 1.5, 2.5, 3, 1.5, 1, 0.5, 0.5])
