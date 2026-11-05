@@ -503,9 +503,9 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
             salvar_pendentes(st.session_state.pendentes)
             st.rerun()
 
-    # --- LISTAGEM DE PENDENTES E MAPA PYDECK ---
+    # --- LISTAGEM DE PENDENTES E MAPA PYDECK COM PONTO DE PARTIDA DESTACADO ---
     st.subheader("📋 Fila de Pedidos Pendentes")
-    st.markdown("O mapa interativo exibe todos os pontos localizados para facilitar a visualização.")
+    st.markdown("O mapa interativo exibe o ponto de partida (em azul) e as entregas (em vermelho).")
 
     # Garante coordenadas para pontos antigos que não tinham
     for p in st.session_state.pendentes:
@@ -514,43 +514,81 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
             if lat and lon:
                 p['lat'], p['lon'] = float(lat), float(lon)
 
-    if st.session_state.pendentes:
-        dados_mapa = []
+    # Ponto de Partida Fixo (Base) geocodificado
+    lat_base, lon_base = geocodificar("Rua Doutor Ivom Rodrigues Pereira, 5078, Franca, SP, Brasil")
+
+    if st.session_state.pendentes or (lat_base and lon_base):
+        dados_mapa_clientes = []
         for p in st.session_state.pendentes:
             if p.get('lat') and p.get('lon'):
-                dados_mapa.append({
+                dados_mapa_clientes.append({
                     "lat": float(p['lat']), 
                     "lon": float(p['lon']),
                     "Cliente": p.get("cliente", "Desconhecido"),
-                    "Endereco": p.get("endereco", "Não informado")
+                    "Endereco": p.get("endereco", "Não informado"),
+                    "Tipo": "Entrega"
                 })
-                
-        if dados_mapa:
-            df_mapa = pd.DataFrame(dados_mapa)
-            with st.expander("📍 Visualizar Mapa Interativo de Entregas", expanded=True):
-                layer = pdk.Layer(
+        
+        # Adiciona a Base na lista de pontos do mapa com destaque
+        dados_mapa_base = []
+        if lat_base and lon_base:
+            dados_mapa_base.append({
+                "lat": lat_base,
+                "lon": lon_base,
+                "Cliente": "🏢 Base União Embalagens (Início/Fim)",
+                "Endereco": "Rua Doutor Ivom Rodrigues Pereira, 5078",
+                "Tipo": "Base"
+            })
+
+        df_clientes_mapa = pd.DataFrame(dados_mapa_clientes) if dados_mapa_clientes else pd.DataFrame(columns=["lat", "lon", "Cliente", "Endereco", "Tipo"])
+        df_base_mapa = pd.DataFrame(dados_mapa_base)
+
+        with st.expander("📍 Visualizar Mapa Interativo de Entregas e Base", expanded=True):
+            camadas = []
+            
+            # Camada dos Clientes (Vermelho)
+            if not df_clientes_mapa.empty:
+                layer_clientes = pdk.Layer(
                     'ScatterplotLayer',
-                    data=df_mapa,
+                    data=df_clientes_mapa,
                     get_position='[lon, lat]',
                     get_color='[200, 30, 0, 180]',
-                    get_radius=180,
+                    get_radius=150,
                     pickable=True
                 )
-                view_state = pdk.ViewState(
-                    latitude=df_mapa['lat'].mean(),
-                    longitude=df_mapa['lon'].mean(),
-                    zoom=13,
-                    pitch=0
+                camadas.append(layer_clientes)
+
+            # Camada da Base / Loja (Azul maior para destaque)
+            if not df_base_mapa.empty:
+                layer_base = pdk.Layer(
+                    'ScatterplotLayer',
+                    data=df_base_mapa,
+                    get_position='[lon, lat]',
+                    get_color='[30, 100, 240, 220]',
+                    get_radius=220,
+                    pickable=True
                 )
-                r = pdk.Deck(
-                    map_style=None,
-                    layers=[layer],
-                    initial_view_state=view_state,
-                    tooltip={"text": "Cliente: {Cliente}\nEndereço: {Endereco}"}
-                )
-                st.pydeck_chart(r)
-        else:
-            st.info("ℹ️ Nenhum ponto geográfico válido encontrado para exibir no mapa ainda.")
+                camadas.append(layer_base)
+
+            # Centraliza o mapa na base ou na média dos pontos
+            lat_centro = lat_base if lat_base else (-20.5387 if df_clientes_mapa.empty else df_clientes_mapa['lat'].mean())
+            lon_centro = lon_base if lon_base else (-47.4005 if df_clientes_mapa.empty else df_clientes_mapa['lon'].mean())
+
+            view_state = pdk.ViewState(
+                latitude=lat_centro,
+                longitude=lon_centro,
+                zoom=13,
+                pitch=0
+            )
+            r = pdk.Deck(
+                map_style=None,
+                layers=camadas,
+                initial_view_state=view_state,
+                tooltip={"text": "{Cliente}\n{Endereco}"}
+            )
+            st.pydeck_chart(r)
+    else:
+        st.info("ℹ️ Nenhum ponto geográfico encontrado.")
 
     if st.session_state.pendentes:
         c_sel, c_cli, c_end, c_ped, c_hor, c_bell, c_del = st.columns([0.5, 3, 3.5, 1.5, 1, 0.5, 0.5])
