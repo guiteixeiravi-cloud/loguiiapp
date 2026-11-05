@@ -137,7 +137,7 @@ USUARIOS_CADASTRADOS = {
     "escritorio": "041020"
 }
 
-# --- SISTEMA DE NAVEGAÇÃO E PERSISTÊNCIA ---
+# --- SISTEMA DE NAVEGAÇÃO E PERSISTÊNCIA NA URL (F5 SAFE) ---
 if "autenticado" not in st.session_state: 
     if hasattr(st, "query_params") and st.query_params.get("auth") == "loguii_ok":
         st.session_state.autenticado = True
@@ -145,10 +145,21 @@ if "autenticado" not in st.session_state:
         st.session_state.autenticado = False
 
 if "pagina_atual" not in st.session_state:
-    st.session_state.pagina_atual = "menu"
+    if hasattr(st, "query_params") and "pagina" in st.query_params:
+        st.session_state.pagina_atual = st.query_params["pagina"]
+    else:
+        st.session_state.pagina_atual = "menu"
+
+def mudar_pagina(nova_pagina):
+    st.session_state.pagina_atual = nova_pagina
+    if hasattr(st, "query_params"):
+        st.query_params["pagina"] = nova_pagina
+    st.rerun()
 
 def voltar_menu():
     st.session_state.pagina_atual = "menu"
+    if hasattr(st, "query_params") and "pagina" in st.query_params:
+        del st.query_params["pagina"]
     st.rerun()
 
 # --- TELA DE LOGIN ---
@@ -199,21 +210,19 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "menu":
         st.markdown("### 🚚 LoGuii Solução Logística")
         st.markdown("Sistema completo para roteirização inteligente, gestão de fila de entregas e impressão de checklists.")
         if st.button("Acessar LoGuii", use_container_width=True, type="primary"):
-            st.session_state.pagina_atual = "loguii"
-            st.rerun()
+            mudar_pagina("loguii")
             
     with col2:
         st.markdown("### 🔗 Links Úteis da Empresa")
         st.markdown("Acesso rápido e cópia instantânea de CNPJs, endereços de estoques, PIX e contatos departamentais.")
         if st.button("Acessar Links Úteis", use_container_width=True):
-            st.session_state.pagina_atual = "links"
-            st.rerun()
+            mudar_pagina("links")
             
     st.sidebar.divider()
     if st.sidebar.button("🚪 Sair do Sistema (Logout)", use_container_width=True):
         st.session_state.autenticado = False
-        if hasattr(st, "query_params") and "auth" in st.query_params:
-            del st.query_params["auth"]
+        if hasattr(st, "query_params"):
+            st.query_params.clear()
         st.rerun()
         
     st.stop()
@@ -689,7 +698,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
     # --- FILA 1: CAMINHÃO (EMBARCADOS) ---
     st.markdown("### 🚚 Prontos para Embarque (Caminhão)")
     st.markdown("Itens que **entrarão na próxima rota gerada**.")
-    pedidos_rota = [(i, p) for i, p in enumerate(st.session_state.pendentes) if p.get('status', 'espera') == 'rota']
+    pedidos_rota = [(i, p) for i, p in enumerate(st.session_state.pendentes) if p.get('status', 'espera'] == 'rota'] # type: ignore
     
     if pedidos_rota:
         for i, p in pedidos_rota:
