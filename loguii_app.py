@@ -698,7 +698,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
     # --- FILA 1: CAMINHÃO (EMBARCADOS) ---
     st.markdown("### 🚚 Prontos para Embarque (Caminhão)")
     st.markdown("Itens que **entrarão na próxima rota gerada**.")
-    pedidos_rota = [(i, p) for i, p in enumerate(st.session_state.pendentes) if p.get('status', 'espera'] == 'rota'] # type: ignore
+    pedidos_rota = [(i, p) for i, p in enumerate(st.session_state.pendentes) if p.get('status', 'espera') == 'rota']
     
     if pedidos_rota:
         for i, p in pedidos_rota:
