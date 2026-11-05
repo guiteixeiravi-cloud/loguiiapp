@@ -73,11 +73,11 @@ def carregar_estoque():
 
 lista_estoque = carregar_estoque()
 
-# --- BANCO DE DADOS DE USUÁRIOS BLINDADO ---
+# --- BANCO DE DADOS DE USUÁRIOS ATUALIZADO ---
 USUARIOS_CADASTRADOS = {
     "admin": "123456",
-    "expedicao": "loguii2026",
-    "motorista": "uniaologuii"
+    "estoque": "alex123",
+    "escritorio": "041020"
 }
 
 # --- SISTEMA DE NAVEGAÇÃO E PERSISTÊNCIA ---
@@ -376,7 +376,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
     col_texto, col_imagem = st.columns([5, 1])
     with col_texto:
         st.title("🚚 LoGuii Solução Logística")
-        st.markdown("Gerencie pedidos pendentes, agrupe por raio de 7km e gere rotas otimizadas.")
+        st.markdown("Gerencie pedidos pendentes e gere rotas otimizadas.")
     with col_imagem:
         if os.path.exists(caminho_caricatura):
             st.image(caminho_caricatura, width=130)
@@ -418,55 +418,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                 
         return None, None
 
-    def atualizar_agrupamentos(pendentes):
-        n = len(pendentes)
-        if n == 0: return
-
-        for p in pendentes:
-            if not p.get('lat') or not p.get('lon'):
-                lat, lon = geocodificar(p['endereco'])
-                if lat and lon:
-                    p['lat'], p['lon'] = float(lat), float(lon)
-
-        adj = {i: [] for i in range(n)}
-        for i in range(n):
-            for j in range(i+1, n):
-                if pendentes[i].get('lat') and pendentes[j].get('lat'):
-                    d = haversine(float(pendentes[i]['lat']), float(pendentes[i]['lon']), float(pendentes[j]['lat']), float(pendentes[j]['lon']))
-                    if d <= 7.0:
-                        adj[i].append(j)
-                        adj[j].append(i)
-        
-        visited = set()
-        grupo_id = 1
-        for i in range(n):
-            if i not in visited:
-                queue = [i]
-                visited.add(i)
-                componente = [i]
-                
-                while queue:
-                    curr = queue.pop(0)
-                    for viz in adj[curr]:
-                        if viz not in visited:
-                            visited.add(viz)
-                            queue.append(viz)
-                            componente.append(viz)
-                
-                nome_grupo = None
-                for c in componente:
-                    if pendentes[c].get('fixo') and pendentes[c].get('grupo'):
-                        nome_grupo = pendentes[c]['grupo']
-                        break
-                
-                if not nome_grupo:
-                    nome_grupo = f"Rota {grupo_id}"
-                    grupo_id += 1
-                    
-                for c in componente:
-                    if not pendentes[c].get('fixo'):
-                        pendentes[c]['grupo'] = nome_grupo
-
     # --- MENU LATERAL DO LOGUII ---
     st.sidebar.header("🔍 1. Adicionar à Fila")
     if status_ok and not df_clientes.empty:
@@ -490,11 +441,10 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                             "cliente": str(dados_cli['Cliente']),
                             "endereco": endereco_completo,
                             "pedido_num": "", "urgente": False, "horario": "",
-                            "selecionado": True, "itens": [], "grupo": "Calculando...", "fixo": False,
+                            "selecionado": True, "itens": [],
                             "lat": float(lat) if lat else None, 
                             "lon": float(lon) if lon else None
                         })
-                        atualizar_agrupamentos(st.session_state.pendentes)
                         salvar_pendentes(st.session_state.pendentes)
                         st.sidebar.success(f"{dados_cli['Cliente']} adicionado!")
                         st.rerun()
@@ -537,7 +487,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
         return {
             "cliente": cliente, "endereco": end_completo, 
             "pedido_num": "", "urgente": False, "horario": "", 
-            "selecionado": True, "itens": [], "grupo": "Calculando...", "fixo": False, 
+            "selecionado": True, "itens": [],
             "lat": float(lat) if lat else None, "lon": float(lon) if lon else None
         }
 
@@ -550,15 +500,19 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                     dados = extrair_dados_imagem(image)
                     dados["uid"] = file_id
                     st.session_state.pendentes.append(dados)
-            atualizar_agrupamentos(st.session_state.pendentes)
             salvar_pendentes(st.session_state.pendentes)
             st.rerun()
 
     # --- LISTAGEM DE PENDENTES E MAPA PYDECK ---
     st.subheader("📋 Fila de Pedidos Pendentes")
-    st.markdown("Pedidos distantes até 7km são agrupados automaticamente. O mapa interativo exibe todos os pontos localizados.")
+    st.markdown("O mapa interativo exibe todos os pontos localizados para facilitar a visualização.")
 
-    st.session_state.pendentes.sort(key=lambda x: (x.get('grupo', ''), not x.get('urgente', False)))
+    # Garante coordenadas para pontos antigos que não tinham
+    for p in st.session_state.pendentes:
+        if not p.get('lat') or not p.get('lon'):
+            lat, lon = geocodificar(p['endereco'])
+            if lat and lon:
+                p['lat'], p['lon'] = float(lat), float(lon)
 
     if st.session_state.pendentes:
         dados_mapa = []
@@ -568,8 +522,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                     "lat": float(p['lat']), 
                     "lon": float(p['lon']),
                     "Cliente": p.get("cliente", "Desconhecido"),
-                    "Endereco": p.get("endereco", "Não informado"),
-                    "Grupo": p.get("grupo", "Sem Grupo")
+                    "Endereco": p.get("endereco", "Não informado")
                 })
                 
         if dados_mapa:
@@ -593,16 +546,14 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                     map_style=None,
                     layers=[layer],
                     initial_view_state=view_state,
-                    tooltip={"text": "Cliente: {Cliente}\nEndereço: {Endereco}\nGrupo: {Grupo}"}
+                    tooltip={"text": "Cliente: {Cliente}\nEndereço: {Endereco}"}
                 )
-                # Correção aplicada: removido o argumento `theme="streamlit"` que causava o erro
                 st.pydeck_chart(r)
         else:
             st.info("ℹ️ Nenhum ponto geográfico válido encontrado para exibir no mapa ainda.")
 
     if st.session_state.pendentes:
-        c_sel, c_grp, c_cli, c_end, c_ped, c_hor, c_bell, c_del = st.columns([0.5, 1.5, 2.5, 3, 1.5, 1, 0.5, 0.5])
-        c_grp.markdown("**Grupo (7km)**")
+        c_sel, c_cli, c_end, c_ped, c_hor, c_bell, c_del = st.columns([0.5, 3, 3.5, 1.5, 1, 0.5, 0.5])
         c_cli.markdown("**Cliente**")
         c_end.markdown("**Endereço**")
         c_ped.markdown("**Nº Ped.**")
@@ -610,15 +561,9 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
         st.divider()
 
         for i, p in enumerate(st.session_state.pendentes):
-            col_sel, col_grp, col_cli, col_end, col_ped, col_hor, col_bell, col_del = st.columns([0.5, 1.5, 2.5, 3, 1.5, 1, 0.5, 0.5])
+            col_sel, col_cli, col_end, col_ped, col_hor, col_bell, col_del = st.columns([0.5, 3, 3.5, 1.5, 1, 0.5, 0.5])
             
             p['selecionado'] = col_sel.checkbox("", value=p.get('selecionado', True), key=f"sel_{p['uid']}")
-            
-            novo_grupo = col_grp.text_input("Grupo", value=p.get('grupo', ''), key=f"grp_{p['uid']}", label_visibility="collapsed")
-            if novo_grupo != p.get('grupo', ''):
-                p['grupo'] = novo_grupo
-                p['fixo'] = True
-                salvar_pendentes(st.session_state.pendentes)
             
             p['cliente'] = col_cli.text_input("Cliente:", value=p['cliente'], key=f"cli_{p['uid']}", label_visibility="collapsed")
             p['endereco'] = col_end.text_input("Endereço:", value=p['endereco'], key=f"end_{p['uid']}", label_visibility="collapsed")
@@ -637,7 +582,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
 
             if col_del.button("🗑️", key=f"del_{p['uid']}"):
                 st.session_state.pendentes.pop(i)
-                atualizar_agrupamentos(st.session_state.pendentes)
                 salvar_pendentes(st.session_state.pendentes)
                 st.rerun()
                 
@@ -647,19 +591,10 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
 
             st.divider()
 
-        col_btn1, col_btn2 = st.columns([2, 2])
-        with col_btn1:
-            if st.button("🗑️ Limpar Toda a Fila de Pendentes"):
-                st.session_state.pendentes = []
-                salvar_pendentes(st.session_state.pendentes)
-                st.rerun()
-        with col_btn2:
-            if st.button("🔄 Forçar Re-agrupamento (Limpa Nomes Manuais)"):
-                for p in st.session_state.pendentes:
-                    p['fixo'] = False
-                atualizar_agrupamentos(st.session_state.pendentes)
-                salvar_pendentes(st.session_state.pendentes)
-                st.rerun()
+        if st.button("🗑️ Limpar Toda a Fila de Pendentes"):
+            st.session_state.pendentes = []
+            salvar_pendentes(st.session_state.pendentes)
+            st.rerun()
     else:
         st.info("A fila está vazia. Adicione pedidos usando o menu lateral.")
 
@@ -883,9 +818,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                         for p_hist in rota['entregas']:
                             p_hist['uid'] = f"hist_{time.time()}_{p_hist['cliente']}"
                             p_hist['selecionado'] = True
-                            p_hist['fixo'] = False
                             st.session_state.pendentes.append(p_hist)
-                        atualizar_agrupamentos(st.session_state.pendentes)
                         salvar_pendentes(st.session_state.pendentes)
                         hist.pop(i)
                         with open(arquivo_historico, "w", encoding="utf-8") as f:
