@@ -595,7 +595,8 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                     initial_view_state=view_state,
                     tooltip={"text": "Cliente: {Cliente}\nEndereço: {Endereco}\nGrupo: {Grupo}"}
                 )
-                st.pydeck_chart(r, theme="streamlit")
+                # Correção aplicada: removido o argumento `theme="streamlit"` que causava o erro
+                st.pydeck_chart(r)
         else:
             st.info("ℹ️ Nenhum ponto geográfico válido encontrado para exibir no mapa ainda.")
 
@@ -770,4 +771,131 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
     # --- OTIMIZAÇÃO E GERAÇÃO DA ROTA ---
     st.subheader("🗺️ Otimização e Impressão")
     nome_motorista = st.text_input("👨‍✈️ Nome do Motorista (Opcional):", placeholder="Ex: Roberto")
-    pedidos
+    pedidos_selecionados = [p for p in st.session_state.pendentes if p.get('selecionado', True)]
+
+    if st.button("🗺️ Gerar Rota Otimizada", type="primary"):
+        if not pedidos_selecionados:
+            st.warning("Selecione pelo menos um endereço na fila para gerar a rota.")
+        else:
+            with st.spinner("Calculando rotas otimizadas com inteligência de urgência..."):
+                lat_o, lon_o = geocodificar("Rua Doutor Ivom Rodrigues Pereira, 5078, Franca, SP, Brasil")
+                if not (lat_o and lon_o):
+                    st.error("Erro ao localizar endereço base.")
+                else:
+                    enderecos_validos = [p for p in pedidos_selecionados if p.get('lat') and p.get('lon')]
+                    if enderecos_validos:
+                        ordem_entregas = otimizar_rota_com_urgencia(lat_o, lon_o, enderecos_validos)
+                        st.success("Rota gerada com sucesso!")
+                        st.subheader("📍 Ordem Sugerida de Entregas")
+                        
+                        for idx, p in enumerate(ordem_entregas):
+                            urg_text = f" **[URG. {p.get('horario', '')}]** " if p.get('urgente') else ""
+                            st.markdown(f"**Parada {idx+1}:** {urg_text}{p['cliente']} — *{p['endereco']}*")
+                        
+                        origem_link = "Rua Doutor Ivom Rodrigues Pereira, 5078, Franca, SP".replace(" ", "+")
+                        pontos = "|".join([f"{p['endereco']}, Franca, SP".replace(" ", "+") for p in ordem_entregas])
+                        link_maps = f"https://www.google.com/maps/dir/?api=1&origin={origem_link}&destination={origem_link}&waypoints={pontos}"
+                        
+                        st.markdown(f"[🔗 Abrir Rota no Google Maps]({link_maps})", unsafe_allow_html=True)
+                        
+                        st.divider()
+                        pdf_arquivo = gerar_pdf(ordem_entregas, nome_motorista)
+                        nome_arquivo = f"LoGuii_Rota_{datetime.now().strftime('%d%m%Y_%H%M')}.pdf"
+                        
+                        st.download_button(label="📄 Baixar PDF com Checklist da Rota", data=pdf_arquivo, file_name=nome_arquivo, mime="application/pdf", type="primary")
+                        
+                        st.session_state.pendentes = [p for p in st.session_state.pendentes if not p.get('selecionado', False)]
+                        salvar_pendentes(st.session_state.pendentes)
+                        
+                        historico = []
+                        if os.path.exists(arquivo_historico):
+                            try:
+                                with open(arquivo_historico, "r", encoding="utf-8") as f:
+                                    historico = json.load(f)
+                            except:
+                                pass
+                        
+                        historico = [r for r in historico if (time.time() - r.get("timestamp", 0)) <= 172800]
+                        
+                        historico.insert(0, {
+                            "timestamp": time.time(), 
+                            "data_formatada": datetime.now().strftime("%d/%m/%Y %H:%M"), 
+                            "motorista": nome_motorista or "Não informado", 
+                            "entregas": ordem_entregas, 
+                            "link_maps": link_maps,
+                            "link_rastreamento": "" 
+                        })
+                        
+                        with open(arquivo_historico, "w", encoding="utf-8") as f:
+                            json.dump(historico, f, ensure_ascii=False, indent=4)
+                    else:
+                        st.error("Não foram encontrados endereços válidos para criar a rota.")
+
+    # --- HISTÓRICO DE ROTAS E RASTREAMENTO AO VIVO ---
+    st.divider()
+    st.subheader("🕒 Histórico de Rotas e Rastreamento (Últimas 48h)")
+    hist = []
+    if os.path.exists(arquivo_historico):
+        try:
+            with open(arquivo_historico, "r", encoding="utf-8") as f:
+                hist = json.load(f)
+        except:
+            pass
+            
+    hist = [r for r in hist if (time.time() - r.get("timestamp", 0)) <= 172800]
+
+    if hist:
+        for i, rota in enumerate(hist):
+            with st.expander(f"🛣️ Rota de {rota['data_formatada']} - Motorista: {rota['motorista']} ({len(rota['entregas'])} entregas)"):
+                
+                st.markdown("---")
+                st.markdown("**📡 Rastreamento em Tempo Real**")
+                col_link, col_btn_rastreio = st.columns([4, 2])
+                
+                link_atual = rota.get('link_rastreamento', '')
+                with col_link:
+                    novo_link = st.text_input("Cole o link do Maps ou WhatsApp aqui:", value=link_atual, key=f"link_rastreio_{i}", label_visibility="collapsed", placeholder="Cole o link de rastreamento ao vivo aqui...")
+                
+                with col_btn_rastreio:
+                    if novo_link != link_atual:
+                        hist[i]['link_rastreamento'] = novo_link
+                        with open(arquivo_historico, "w", encoding="utf-8") as f:
+                            json.dump(hist, f, ensure_ascii=False, indent=4)
+                        st.rerun()
+                    if novo_link:
+                        st.markdown(f"<a href='{novo_link}' target='_blank'><button style='width:100%; background-color:#2e7b32; color:white; border:none; padding:6px; border-radius:5px; cursor:pointer;'>📍 Acompanhar Agora</button></a>", unsafe_allow_html=True)
+                st.markdown("---")
+                
+                st.markdown(f"[🔗 Abrir Rota no Google Maps]({rota['link_maps']})", unsafe_allow_html=True)
+                for p in rota['entregas']:
+                    urg_text = f" **[URG. {p.get('horario', '')}]**" if p.get('urgente') else ""
+                    st.write(f"-{urg_text} {p['cliente']}: *{p['endereco']}*")
+                    
+                    if p.get('itens'):
+                        for item in p['itens']:
+                            st.write(f"&nbsp;&nbsp;&nbsp;&nbsp;📦 {item}")
+                
+                col_b1, col_b2, col_b3 = st.columns([2, 2, 2])
+                with col_b1:
+                    st.download_button(label="📄 Re-imprimir PDF", data=gerar_pdf(rota['entregas'], rota['motorista']), file_name=f"LoGuii_Hist_{i}.pdf", mime="application/pdf", key=f"dl_hist_{i}")
+                with col_b2:
+                    if st.button("✏️ Editar (Devolver p/ Fila)", key=f"edit_hist_{i}"):
+                        for p_hist in rota['entregas']:
+                            p_hist['uid'] = f"hist_{time.time()}_{p_hist['cliente']}"
+                            p_hist['selecionado'] = True
+                            p_hist['fixo'] = False
+                            st.session_state.pendentes.append(p_hist)
+                        atualizar_agrupamentos(st.session_state.pendentes)
+                        salvar_pendentes(st.session_state.pendentes)
+                        hist.pop(i)
+                        with open(arquivo_historico, "w", encoding="utf-8") as f:
+                            json.dump(hist, f, ensure_ascii=False, indent=4)
+                        st.rerun()
+                with col_b3:
+                    if st.button("🗑️ Excluir Rota", key=f"del_hist_{i}", type="secondary"):
+                        hist.pop(i)
+                        with open(arquivo_historico, "w", encoding="utf-8") as f:
+                            json.dump(hist, f, ensure_ascii=False, indent=4)
+                        st.rerun()
+    else:
+        st.info("Nenhuma rota salva ainda.")
