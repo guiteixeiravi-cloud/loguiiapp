@@ -529,7 +529,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                     "Tipo": "Entrega"
                 })
         
-        # Adiciona a Base na lista de pontos do mapa com destaque
         dados_mapa_base = []
         if lat_base and lon_base:
             dados_mapa_base.append({
@@ -546,7 +545,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
         with st.expander("📍 Visualizar Mapa Interativo de Entregas e Base", expanded=True):
             camadas = []
             
-            # Camada dos Clientes (Vermelho)
             if not df_clientes_mapa.empty:
                 layer_clientes = pdk.Layer(
                     'ScatterplotLayer',
@@ -558,7 +556,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                 )
                 camadas.append(layer_clientes)
 
-            # Camada da Base / Loja (Azul maior para destaque)
             if not df_base_mapa.empty:
                 layer_base = pdk.Layer(
                     'ScatterplotLayer',
@@ -570,7 +567,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                 )
                 camadas.append(layer_base)
 
-            # Centraliza o mapa na base ou na média dos pontos
             lat_centro = lat_base if lat_base else (-20.5387 if df_clientes_mapa.empty else df_clientes_mapa['lat'].mean())
             lon_centro = lon_base if lon_base else (-47.4005 if df_clientes_mapa.empty else df_clientes_mapa['lon'].mean())
 
@@ -604,7 +600,17 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
             p['selecionado'] = col_sel.checkbox("", value=p.get('selecionado', True), key=f"sel_{p['uid']}")
             
             p['cliente'] = col_cli.text_input("Cliente:", value=p['cliente'], key=f"cli_{p['uid']}", label_visibility="collapsed")
-            p['endereco'] = col_end.text_input("Endereço:", value=p['endereco'], key=f"end_{p['uid']}", label_visibility="collapsed")
+            
+            # Detecção de alteração de endereço com re-geocodificação automática
+            novo_endereco = col_end.text_input("Endereço:", value=p['endereco'], key=f"end_{p['uid']}", label_visibility="collapsed")
+            if novo_endereco != p.get('endereco', ''):
+                p['endereco'] = novo_endereco
+                lat, lon = geocodificar(novo_endereco)
+                p['lat'] = float(lat) if lat else None
+                p['lon'] = float(lon) if lon else None
+                salvar_pendentes(st.session_state.pendentes)
+                st.rerun()
+
             p['pedido_num'] = col_ped.text_input("Pedido:", value=p.get('pedido_num', ''), key=f"ped_{p['uid']}", label_visibility="collapsed")
             
             if p.get('urgente', False):
