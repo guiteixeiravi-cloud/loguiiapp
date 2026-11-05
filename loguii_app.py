@@ -348,7 +348,12 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
         if os.path.exists(arquivo_pendentes):
             try:
                 with open(arquivo_pendentes, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    lista = json.load(f)
+                    # Migração para o novo modelo de status (caso haja dados antigos)
+                    for item in lista:
+                        if 'status' not in item:
+                            item['status'] = 'espera'
+                    return lista
             except:
                 pass
         return []
@@ -376,7 +381,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
     col_texto, col_imagem = st.columns([5, 1])
     with col_texto:
         st.title("🚚 LoGuii Solução Logística")
-        st.markdown("Gerencie pedidos pendentes e gere rotas otimizadas.")
+        st.markdown("Gerencie o Galpão de Espera e selecione os pedidos para montar a rota do Caminhão.")
     with col_imagem:
         if os.path.exists(caminho_caricatura):
             st.image(caminho_caricatura, width=130)
@@ -425,7 +430,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
         if all(col in df_clientes.columns for col in colunas_necessarias):
             opcoes = df_clientes['Código'] + " - " + df_clientes['Cliente']
             cliente_selecionado = st.sidebar.selectbox("Digite o Código ou Nome do Cliente:", options=["Selecione..."] + opcoes.tolist())
-            if st.sidebar.button("➕ Enviar para Pendentes", type="primary"):
+            if st.sidebar.button("➕ Enviar para Galpão", type="primary"):
                 if cliente_selecionado != "Selecione...":
                     with st.spinner("Adicionando e mapeando endereço..."):
                         codigo_busca = cliente_selecionado.split(" - ")[0]
@@ -441,12 +446,12 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                             "cliente": str(dados_cli['Cliente']),
                             "endereco": endereco_completo,
                             "pedido_num": "", "urgente": False, "horario": "",
-                            "selecionado": True, "itens": [],
+                            "status": "espera", "itens": [],
                             "lat": float(lat) if lat else None, 
                             "lon": float(lon) if lon else None
                         })
                         salvar_pendentes(st.session_state.pendentes)
-                        st.sidebar.success(f"{dados_cli['Cliente']} adicionado!")
+                        st.sidebar.success(f"{dados_cli['Cliente']} adicionado ao Galpão!")
                         st.rerun()
                 else:
                     st.sidebar.warning("Selecione um cliente primeiro.")
@@ -487,7 +492,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
         return {
             "cliente": cliente, "endereco": end_completo, 
             "pedido_num": "", "urgente": False, "horario": "", 
-            "selecionado": True, "itens": [],
+            "status": "espera", "itens": [],
             "lat": float(lat) if lat else None, "lon": float(lon) if lon else None
         }
 
@@ -503,9 +508,9 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
             salvar_pendentes(st.session_state.pendentes)
             st.rerun()
 
-    # --- LISTAGEM DE PENDENTES E MAPA PYDECK COM PONTO DE PARTIDA DESTACADO ---
-    st.subheader("📋 Fila de Pedidos Pendentes")
-    st.markdown("O mapa interativo exibe o ponto de partida (em azul) e as entregas (em vermelho).")
+    # --- LISTAGEM DE PENDENTES E MAPA PYDECK ---
+    st.subheader("🗺️ Visão Geográfica Geral")
+    st.markdown("Legenda: 🔵 **Base** | 🟢 **No Caminhão (Embarcados)** | 🔴 **No Galpão (Espera)**")
 
     # Garante coordenadas para pontos antigos que não tinham
     for p in st.session_state.pendentes:
@@ -514,94 +519,103 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
             if lat and lon:
                 p['lat'], p['lon'] = float(lat), float(lon)
 
-    # Ponto de Partida Fixo (Base) geocodificado
     lat_base, lon_base = geocodificar("Rua Doutor Ivom Rodrigues Pereira, 5078, Franca, SP, Brasil")
 
     if st.session_state.pendentes or (lat_base and lon_base):
-        dados_mapa_clientes = []
+        dados_mapa_espera = []
+        dados_mapa_rota = []
+        
         for p in st.session_state.pendentes:
             if p.get('lat') and p.get('lon'):
-                dados_mapa_clientes.append({
+                ponto = {
                     "lat": float(p['lat']), 
                     "lon": float(p['lon']),
-                    "Cliente": p.get("cliente", "Desconhecido"),
-                    "Endereco": p.get("endereco", "Não informado"),
-                    "Tipo": "Entrega"
-                })
+                    "Cliente": p.get("cliente", "Desconhecido")[:15] + ("..." if len(p.get("cliente", "")) > 15 else ""), # Nome curto pro mapa
+                    "Endereco": p.get("endereco", "Não informado")
+                }
+                if p.get('status', 'espera') == 'rota':
+                    dados_mapa_rota.append(ponto)
+                else:
+                    dados_mapa_espera.append(ponto)
         
         dados_mapa_base = []
         if lat_base and lon_base:
             dados_mapa_base.append({
                 "lat": lat_base,
                 "lon": lon_base,
-                "Cliente": "🏢 Base União Embalagens (Início/Fim)",
-                "Endereco": "Rua Doutor Ivom Rodrigues Pereira, 5078",
-                "Tipo": "Base"
+                "Cliente": "Base União Embalagens",
+                "Endereco": "Ponto de Partida e Retorno"
             })
 
-        df_clientes_mapa = pd.DataFrame(dados_mapa_clientes) if dados_mapa_clientes else pd.DataFrame(columns=["lat", "lon", "Cliente", "Endereco", "Tipo"])
+        df_espera_mapa = pd.DataFrame(dados_mapa_espera) if dados_mapa_espera else pd.DataFrame(columns=["lat", "lon", "Cliente", "Endereco"])
+        df_rota_mapa = pd.DataFrame(dados_mapa_rota) if dados_mapa_rota else pd.DataFrame(columns=["lat", "lon", "Cliente", "Endereco"])
         df_base_mapa = pd.DataFrame(dados_mapa_base)
 
-        with st.expander("📍 Visualizar Mapa Interativo de Entregas e Base", expanded=True):
+        with st.expander("📍 Expandir Mapa Interativo", expanded=True):
             camadas = []
             
-            if not df_clientes_mapa.empty:
-                layer_clientes = pdk.Layer(
-                    'ScatterplotLayer',
-                    data=df_clientes_mapa,
-                    get_position='[lon, lat]',
-                    get_color='[200, 30, 0, 180]',
-                    get_radius=150,
-                    pickable=True
-                )
-                camadas.append(layer_clientes)
+            # Galpão (Vermelho) - Bolinha e Texto
+            if not df_espera_mapa.empty:
+                camadas.append(pdk.Layer(
+                    'ScatterplotLayer', data=df_espera_mapa, get_position='[lon, lat]',
+                    get_color='[200, 30, 0, 180]', get_radius=150, pickable=True
+                ))
+                camadas.append(pdk.Layer(
+                    'TextLayer', data=df_espera_mapa, get_position='[lon, lat]',
+                    get_text='Cliente', get_color='[255, 255, 255, 255]', get_size=13,
+                    get_alignment_baseline="'bottom'", get_pixel_offset=[0, -15],
+                    background=True, get_background_color='[0, 0, 0, 150]'
+                ))
+            
+            # Caminhão (Verde) - Bolinha e Texto
+            if not df_rota_mapa.empty:
+                camadas.append(pdk.Layer(
+                    'ScatterplotLayer', data=df_rota_mapa, get_position='[lon, lat]',
+                    get_color='[30, 200, 50, 200]', get_radius=180, pickable=True
+                ))
+                camadas.append(pdk.Layer(
+                    'TextLayer', data=df_rota_mapa, get_position='[lon, lat]',
+                    get_text='Cliente', get_color='[255, 255, 255, 255]', get_size=14, 
+                    get_alignment_baseline="'bottom'", get_pixel_offset=[0, -18],
+                    background=True, get_background_color='[0, 0, 0, 150]'
+                ))
 
+            # Base (Azul) - Bolinha e Texto
             if not df_base_mapa.empty:
-                layer_base = pdk.Layer(
-                    'ScatterplotLayer',
-                    data=df_base_mapa,
-                    get_position='[lon, lat]',
-                    get_color='[30, 100, 240, 220]',
-                    get_radius=220,
-                    pickable=True
-                )
-                camadas.append(layer_base)
+                camadas.append(pdk.Layer(
+                    'ScatterplotLayer', data=df_base_mapa, get_position='[lon, lat]',
+                    get_color='[30, 100, 240, 220]', get_radius=220, pickable=True
+                ))
+                camadas.append(pdk.Layer(
+                    'TextLayer', data=df_base_mapa, get_position='[lon, lat]',
+                    get_text='Cliente', get_color='[255, 255, 255, 255]', get_size=15, 
+                    get_alignment_baseline="'bottom'", get_pixel_offset=[0, -22],
+                    background=True, get_background_color='[0, 0, 0, 180]'
+                ))
 
-            lat_centro = lat_base if lat_base else (-20.5387 if df_clientes_mapa.empty else df_clientes_mapa['lat'].mean())
-            lon_centro = lon_base if lon_base else (-47.4005 if df_clientes_mapa.empty else df_clientes_mapa['lon'].mean())
+            lat_centro = lat_base if lat_base else (-20.5387)
+            lon_centro = lon_base if lon_base else (-47.4005)
 
-            view_state = pdk.ViewState(
-                latitude=lat_centro,
-                longitude=lon_centro,
-                zoom=13,
-                pitch=0
-            )
-            r = pdk.Deck(
-                map_style=None,
-                layers=camadas,
-                initial_view_state=view_state,
-                tooltip={"text": "{Cliente}\n{Endereco}"}
-            )
+            view_state = pdk.ViewState(latitude=lat_centro, longitude=lon_centro, zoom=13, pitch=0)
+            r = pdk.Deck(map_style=None, layers=camadas, initial_view_state=view_state, tooltip={"text": "{Cliente}\n{Endereco}"})
             st.pydeck_chart(r)
-    else:
-        st.info("ℹ️ Nenhum ponto geográfico encontrado.")
 
-    if st.session_state.pendentes:
-        c_sel, c_cli, c_end, c_ped, c_hor, c_bell, c_del = st.columns([0.5, 3, 3.5, 1.5, 1, 0.5, 0.5])
-        c_cli.markdown("**Cliente**")
-        c_end.markdown("**Endereço**")
-        c_ped.markdown("**Nº Ped.**")
-        c_hor.markdown("**Horário**")
-        st.divider()
+    st.divider()
 
-        for i, p in enumerate(st.session_state.pendentes):
-            col_sel, col_cli, col_end, col_ped, col_hor, col_bell, col_del = st.columns([0.5, 3, 3.5, 1.5, 1, 0.5, 0.5])
+    # FUNÇÃO REUTILIZÁVEL PARA DESENHAR LINHAS DE PEDIDO
+    def renderizar_linha_pedido(i, p, cor_fundo, is_embarcado):
+        acao_label = "⬇️ Retirar" if is_embarcado else "⬆️ Embarcar"
+        
+        with st.container(border=True):
+            col_btn, col_cli, col_end, col_ped, col_hor, col_bell, col_del = st.columns([1.5, 3, 3, 1.5, 1, 0.5, 0.5])
             
-            p['selecionado'] = col_sel.checkbox("", value=p.get('selecionado', True), key=f"sel_{p['uid']}")
-            
+            if col_btn.button(acao_label, key=f"acao_{p['uid']}", type="primary" if not is_embarcado else "secondary", use_container_width=True):
+                p['status'] = 'espera' if is_embarcado else 'rota'
+                salvar_pendentes(st.session_state.pendentes)
+                st.rerun()
+                
             p['cliente'] = col_cli.text_input("Cliente:", value=p['cliente'], key=f"cli_{p['uid']}", label_visibility="collapsed")
             
-            # Detecção de alteração de endereço com re-geocodificação automática
             novo_endereco = col_end.text_input("Endereço:", value=p['endereco'], key=f"end_{p['uid']}", label_visibility="collapsed")
             if novo_endereco != p.get('endereco', ''):
                 p['endereco'] = novo_endereco
@@ -611,10 +625,10 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                 salvar_pendentes(st.session_state.pendentes)
                 st.rerun()
 
-            p['pedido_num'] = col_ped.text_input("Pedido:", value=p.get('pedido_num', ''), key=f"ped_{p['uid']}", label_visibility="collapsed")
+            p['pedido_num'] = col_ped.text_input("Pedido:", value=p.get('pedido_num', ''), key=f"ped_{p['uid']}", label_visibility="collapsed", placeholder="Nº Ped.")
             
             if p.get('urgente', False):
-                p['horario'] = col_hor.text_input("Horário:", value=p.get('horario', ''), key=f"hor_{p['uid']}", placeholder="14h00", label_visibility="collapsed")
+                p['horario'] = col_hor.text_input("Horário:", value=p.get('horario', ''), key=f"hor_{p['uid']}", placeholder="14h", label_visibility="collapsed")
             else:
                 col_hor.write("")
 
@@ -629,18 +643,31 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                 salvar_pendentes(st.session_state.pendentes)
                 st.rerun()
                 
-            _, col_itens = st.columns([0.5, 9.5])
-            with col_itens:
-                p['itens'] = st.multiselect("📦 Itens do Pedido (Pesquise por nome ou código):", options=lista_estoque, default=p.get('itens', []), key=f"itens_{p['uid']}")
+            p['itens'] = st.multiselect("📦 Itens do Pedido:", options=lista_estoque, default=p.get('itens', []), key=f"itens_{p['uid']}")
 
-            st.divider()
-
-        if st.button("🗑️ Limpar Toda a Fila de Pendentes"):
-            st.session_state.pendentes = []
-            salvar_pendentes(st.session_state.pendentes)
-            st.rerun()
+    # --- FILA 1: CAMINHÃO (EMBARCADOS) ---
+    st.markdown("### 🚚 Prontos para Embarque (Caminhão)")
+    st.markdown("Itens que **entrarão na próxima rota gerada**.")
+    pedidos_rota = [(i, p) for i, p in enumerate(st.session_state.pendentes) if p.get('status', 'espera') == 'rota']
+    
+    if pedidos_rota:
+        for i, p in pedidos_rota:
+            renderizar_linha_pedido(i, p, "lightgreen", True)
     else:
-        st.info("A fila está vazia. Adicione pedidos usando o menu lateral.")
+        st.info("Nenhum pedido no caminhão. Selecione pedidos do Galpão abaixo para embarcar.")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # --- FILA 2: GALPÃO (ESPERA) ---
+    st.markdown("### 📦 Galpão de Espera (Backlog)")
+    st.markdown("Pedidos aguardando na base. **Não** entrarão na rota até serem embarcados.")
+    pedidos_espera = [(i, p) for i, p in enumerate(st.session_state.pendentes) if p.get('status', 'espera') == 'espera']
+    
+    if pedidos_espera:
+        for i, p in pedidos_espera:
+            renderizar_linha_pedido(i, p, "lightgray", False)
+    else:
+        st.success("O galpão está vazio!")
 
     salvar_pendentes(st.session_state.pendentes)
 
@@ -748,20 +775,23 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
         return rota_ordenada
 
     # --- OTIMIZAÇÃO E GERAÇÃO DA ROTA ---
-    st.subheader("🗺️ Otimização e Impressão")
+    st.divider()
+    st.subheader("🗺️ Geração da Rota e Impressão")
     nome_motorista = st.text_input("👨‍✈️ Nome do Motorista (Opcional):", placeholder="Ex: Roberto")
-    pedidos_selecionados = [p for p in st.session_state.pendentes if p.get('selecionado', True)]
+    
+    # PEGA SOMENTE QUEM ESTÁ NO CAMINHÃO (STATUS = ROTA)
+    pedidos_prontos = [p for p in st.session_state.pendentes if p.get('status', 'espera') == 'rota']
 
-    if st.button("🗺️ Gerar Rota Otimizada", type="primary"):
-        if not pedidos_selecionados:
-            st.warning("Selecione pelo menos um endereço na fila para gerar a rota.")
+    if st.button("🗺️ Gerar Rota (Somente Embarcados)", type="primary"):
+        if not pedidos_prontos:
+            st.warning("O Caminhão está vazio! Embarque pelo menos um pedido no Galpão para gerar a rota.")
         else:
             with st.spinner("Calculando rotas otimizadas com inteligência de urgência..."):
                 lat_o, lon_o = geocodificar("Rua Doutor Ivom Rodrigues Pereira, 5078, Franca, SP, Brasil")
                 if not (lat_o and lon_o):
                     st.error("Erro ao localizar endereço base.")
                 else:
-                    enderecos_validos = [p for p in pedidos_selecionados if p.get('lat') and p.get('lon')]
+                    enderecos_validos = [p for p in pedidos_prontos if p.get('lat') and p.get('lon')]
                     if enderecos_validos:
                         ordem_entregas = otimizar_rota_com_urgencia(lat_o, lon_o, enderecos_validos)
                         st.success("Rota gerada com sucesso!")
@@ -783,7 +813,8 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                         
                         st.download_button(label="📄 Baixar PDF com Checklist da Rota", data=pdf_arquivo, file_name=nome_arquivo, mime="application/pdf", type="primary")
                         
-                        st.session_state.pendentes = [p for p in st.session_state.pendentes if not p.get('selecionado', False)]
+                        # Remove APENAS os que estavam no caminhão, preservando o galpão
+                        st.session_state.pendentes = [p for p in st.session_state.pendentes if p.get('status', 'espera') != 'rota']
                         salvar_pendentes(st.session_state.pendentes)
                         
                         historico = []
@@ -858,10 +889,10 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                 with col_b1:
                     st.download_button(label="📄 Re-imprimir PDF", data=gerar_pdf(rota['entregas'], rota['motorista']), file_name=f"LoGuii_Hist_{i}.pdf", mime="application/pdf", key=f"dl_hist_{i}")
                 with col_b2:
-                    if st.button("✏️ Editar (Devolver p/ Fila)", key=f"edit_hist_{i}"):
+                    if st.button("✏️ Devolver para o Galpão", key=f"edit_hist_{i}"):
                         for p_hist in rota['entregas']:
                             p_hist['uid'] = f"hist_{time.time()}_{p_hist['cliente']}"
-                            p_hist['selecionado'] = True
+                            p_hist['status'] = 'espera' # Volta pro galpão direto
                             st.session_state.pendentes.append(p_hist)
                         salvar_pendentes(st.session_state.pendentes)
                         hist.pop(i)
