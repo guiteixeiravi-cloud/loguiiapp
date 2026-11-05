@@ -6,6 +6,7 @@ import os
 import json
 import base64
 import math
+import unicodedata
 from datetime import datetime
 import streamlit as st
 import streamlit.components.v1 as components
@@ -36,6 +37,12 @@ caminho_caricatura = os.path.join(diretorio_atual, "caricatura.png")
 caminho_logo = os.path.join(diretorio_atual, "logo.png")
 arquivo_historico = os.path.join(diretorio_atual, "historico_rotas.json")
 arquivo_pendentes = os.path.join(diretorio_atual, "pendentes.json")
+
+# --- FUNÇÃO AUXILIAR PARA MAPAS (REMOVER ACENTOS) ---
+def remover_acentos(txt):
+    if not txt: return ""
+    txt = str(txt)
+    return ''.join(c for c in unicodedata.normalize('NFD', txt) if unicodedata.category(c) != 'Mn')
 
 # --- LEITURA DO ARQUIVO DE ESTOQUE ---
 @st.cache_data
@@ -349,7 +356,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
             try:
                 with open(arquivo_pendentes, "r", encoding="utf-8") as f:
                     lista = json.load(f)
-                    # Migração para o novo modelo de status (caso haja dados antigos)
                     for item in lista:
                         if 'status' not in item:
                             item['status'] = 'espera'
@@ -527,10 +533,15 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
         
         for p in st.session_state.pendentes:
             if p.get('lat') and p.get('lon'):
+                # TRATAMENTO PARA O MAPA: Remove acentos e permite nomes mais longos
+                nome_tratado = remover_acentos(p.get("cliente", "Desconhecido"))
+                if len(nome_tratado) > 40:
+                    nome_tratado = nome_tratado[:37] + "..."
+                
                 ponto = {
                     "lat": float(p['lat']), 
                     "lon": float(p['lon']),
-                    "Cliente": p.get("cliente", "Desconhecido")[:15] + ("..." if len(p.get("cliente", "")) > 15 else ""), # Nome curto pro mapa
+                    "Cliente": nome_tratado,
                     "Endereco": p.get("endereco", "Não informado")
                 }
                 if p.get('status', 'espera') == 'rota':
@@ -543,7 +554,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
             dados_mapa_base.append({
                 "lat": lat_base,
                 "lon": lon_base,
-                "Cliente": "Base União Embalagens",
+                "Cliente": "Base Uniao Embalagens",
                 "Endereco": "Ponto de Partida e Retorno"
             })
 
@@ -554,7 +565,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
         with st.expander("📍 Expandir Mapa Interativo", expanded=True):
             camadas = []
             
-            # Galpão (Vermelho) - Bolinha e Texto
+            # Galpão (Vermelho) - Bolinha e Texto com fonte menor (11)
             if not df_espera_mapa.empty:
                 camadas.append(pdk.Layer(
                     'ScatterplotLayer', data=df_espera_mapa, get_position='[lon, lat]',
@@ -562,12 +573,12 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                 ))
                 camadas.append(pdk.Layer(
                     'TextLayer', data=df_espera_mapa, get_position='[lon, lat]',
-                    get_text='Cliente', get_color='[255, 255, 255, 255]', get_size=13,
+                    get_text='Cliente', get_color='[255, 255, 255, 255]', get_size=11,
                     get_alignment_baseline="'bottom'", get_pixel_offset=[0, -15],
                     background=True, get_background_color='[0, 0, 0, 150]'
                 ))
             
-            # Caminhão (Verde) - Bolinha e Texto
+            # Caminhão (Verde) - Bolinha e Texto com fonte menor (11)
             if not df_rota_mapa.empty:
                 camadas.append(pdk.Layer(
                     'ScatterplotLayer', data=df_rota_mapa, get_position='[lon, lat]',
@@ -575,12 +586,12 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                 ))
                 camadas.append(pdk.Layer(
                     'TextLayer', data=df_rota_mapa, get_position='[lon, lat]',
-                    get_text='Cliente', get_color='[255, 255, 255, 255]', get_size=14, 
+                    get_text='Cliente', get_color='[255, 255, 255, 255]', get_size=11, 
                     get_alignment_baseline="'bottom'", get_pixel_offset=[0, -18],
                     background=True, get_background_color='[0, 0, 0, 150]'
                 ))
 
-            # Base (Azul) - Bolinha e Texto
+            # Base (Azul)
             if not df_base_mapa.empty:
                 camadas.append(pdk.Layer(
                     'ScatterplotLayer', data=df_base_mapa, get_position='[lon, lat]',
@@ -588,7 +599,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                 ))
                 camadas.append(pdk.Layer(
                     'TextLayer', data=df_base_mapa, get_position='[lon, lat]',
-                    get_text='Cliente', get_color='[255, 255, 255, 255]', get_size=15, 
+                    get_text='Cliente', get_color='[255, 255, 255, 255]', get_size=12, 
                     get_alignment_baseline="'bottom'", get_pixel_offset=[0, -22],
                     background=True, get_background_color='[0, 0, 0, 180]'
                 ))
@@ -603,7 +614,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
     st.divider()
 
     # FUNÇÃO REUTILIZÁVEL PARA DESENHAR LINHAS DE PEDIDO
-    def renderizar_linha_pedido(i, p, cor_fundo, is_embarcado):
+    def renderizar_linha_pedido(i, p, is_embarcado):
         acao_label = "⬇️ Retirar" if is_embarcado else "⬆️ Embarcar"
         
         with st.container(border=True):
@@ -624,6 +635,10 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                 p['lon'] = float(lon) if lon else None
                 salvar_pendentes(st.session_state.pendentes)
                 st.rerun()
+
+            # ALERTA DE ENDEREÇO INVÁLIDO (UX Aprimorada)
+            if p.get('lat') is None:
+                col_end.markdown("<span style='color:#d32f2f; font-size:12px; font-weight:bold;'>⚠️ Endereço não localizado no mapa. Rota ignorará este ponto.</span>", unsafe_allow_html=True)
 
             p['pedido_num'] = col_ped.text_input("Pedido:", value=p.get('pedido_num', ''), key=f"ped_{p['uid']}", label_visibility="collapsed", placeholder="Nº Ped.")
             
@@ -652,7 +667,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
     
     if pedidos_rota:
         for i, p in pedidos_rota:
-            renderizar_linha_pedido(i, p, "lightgreen", True)
+            renderizar_linha_pedido(i, p, True)
     else:
         st.info("Nenhum pedido no caminhão. Selecione pedidos do Galpão abaixo para embarcar.")
 
@@ -665,7 +680,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
     
     if pedidos_espera:
         for i, p in pedidos_espera:
-            renderizar_linha_pedido(i, p, "lightgray", False)
+            renderizar_linha_pedido(i, p, False)
     else:
         st.success("O galpão está vazio!")
 
@@ -744,34 +759,61 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
         buffer.seek(0)
         return buffer
 
-    def extrair_minutos(horario_str):
-        if not horario_str: return 720
-        try:
-            numeros = re.findall(r'\d+', str(horario_str))
-            if len(numeros) >= 2: return int(numeros[0]) * 60 + int(numeros[1])
-            elif len(numeros) == 1:
-                n = numeros[0]
-                if len(n) >= 3: return int(n[:-2]) * 60 + int(n[-2:])
-                return int(n) * 60
-        except: pass
-        return 720
-
+    # NOVO ALGORITMO: GULOSO + 2-OPT (Fim das voltas inúteis)
     def otimizar_rota_com_urgencia(origem_lat, origem_lon, pedidos):
+        if not pedidos: return []
+        
         unvisited = pedidos.copy()
         current_lat, current_lon = float(origem_lat), float(origem_lon)
         rota_ordenada = []
+        
+        # Passo 1: Construção da Rota (Nearest Neighbor com bônus de urgência)
         while unvisited:
             best_score = float('inf')
             best_idx = -1
             for i, p in enumerate(unvisited):
                 dist = haversine(current_lat, current_lon, float(p['lat']), float(p['lon']))
-                bonus = 12 + 6 * (1 - (extrair_minutos(p.get('horario', '')) / 1440)) if p.get('urgente') else 0
-                if (dist - bonus) < best_score:
-                    best_score = (dist - bonus)
+                bonus = 8 if p.get('urgente') else 0 
+                score = dist - bonus
+                if score < best_score:
+                    best_score = score
                     best_idx = i
             next_p = unvisited.pop(best_idx)
             rota_ordenada.append(next_p)
             current_lat, current_lon = float(next_p['lat']), float(next_p['lon'])
+            
+        # Passo 2: Otimização Fina 2-Opt (Desfaz cruzamentos considerando o retorno à base)
+        melhoria = True
+        iteracoes = 0
+        while melhoria and iteracoes < 100:
+            melhoria = False
+            iteracoes += 1
+            for i in range(len(rota_ordenada) - 1):
+                for j in range(i + 1, len(rota_ordenada)):
+                    if j - i == 1: continue
+                    
+                    lat_prev = float(rota_ordenada[i-1]['lat']) if i > 0 else float(origem_lat)
+                    lon_prev = float(rota_ordenada[i-1]['lon']) if i > 0 else float(origem_lon)
+                    
+                    lat_i, lon_i = float(rota_ordenada[i]['lat']), float(rota_ordenada[i]['lon'])
+                    lat_j, lon_j = float(rota_ordenada[j]['lat']), float(rota_ordenada[j]['lon'])
+                    
+                    # Considera a Base como ponto final para fechar o ciclo
+                    lat_next = float(rota_ordenada[j+1]['lat']) if j+1 < len(rota_ordenada) else float(origem_lat)
+                    lon_next = float(rota_ordenada[j+1]['lon']) if j+1 < len(rota_ordenada) else float(origem_lon)
+                    
+                    # Distância se mantiver como está
+                    dist_atual = haversine(lat_prev, lon_prev, lat_i, lon_i) + \
+                                 haversine(lat_j, lon_j, lat_next, lon_next)
+                    
+                    # Distância se inverter o bloco do meio
+                    dist_nova = haversine(lat_prev, lon_prev, lat_j, lon_j) + \
+                                haversine(lat_i, lon_i, lat_next, lon_next)
+                                
+                    if dist_nova < dist_atual - 0.05: # Só inverte se economizar pelo menos 50 metros
+                        rota_ordenada[i:j+1] = list(reversed(rota_ordenada[i:j+1]))
+                        melhoria = True
+                        
         return rota_ordenada
 
     # --- OTIMIZAÇÃO E GERAÇÃO DA ROTA ---
@@ -779,14 +821,13 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
     st.subheader("🗺️ Geração da Rota e Impressão")
     nome_motorista = st.text_input("👨‍✈️ Nome do Motorista (Opcional):", placeholder="Ex: Roberto")
     
-    # PEGA SOMENTE QUEM ESTÁ NO CAMINHÃO (STATUS = ROTA)
     pedidos_prontos = [p for p in st.session_state.pendentes if p.get('status', 'espera') == 'rota']
 
     if st.button("🗺️ Gerar Rota (Somente Embarcados)", type="primary"):
         if not pedidos_prontos:
             st.warning("O Caminhão está vazio! Embarque pelo menos um pedido no Galpão para gerar a rota.")
         else:
-            with st.spinner("Calculando rotas otimizadas com inteligência de urgência..."):
+            with st.spinner("Otimizando rota com algoritmo avançado para evitar cruzamentos..."):
                 lat_o, lon_o = geocodificar("Rua Doutor Ivom Rodrigues Pereira, 5078, Franca, SP, Brasil")
                 if not (lat_o and lon_o):
                     st.error("Erro ao localizar endereço base.")
@@ -794,7 +835,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                     enderecos_validos = [p for p in pedidos_prontos if p.get('lat') and p.get('lon')]
                     if enderecos_validos:
                         ordem_entregas = otimizar_rota_com_urgencia(lat_o, lon_o, enderecos_validos)
-                        st.success("Rota gerada com sucesso!")
+                        st.success("Rota perfeita gerada com sucesso!")
                         st.subheader("📍 Ordem Sugerida de Entregas")
                         
                         for idx, p in enumerate(ordem_entregas):
@@ -813,7 +854,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                         
                         st.download_button(label="📄 Baixar PDF com Checklist da Rota", data=pdf_arquivo, file_name=nome_arquivo, mime="application/pdf", type="primary")
                         
-                        # Remove APENAS os que estavam no caminhão, preservando o galpão
                         st.session_state.pendentes = [p for p in st.session_state.pendentes if p.get('status', 'espera') != 'rota']
                         salvar_pendentes(st.session_state.pendentes)
                         
@@ -892,7 +932,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                     if st.button("✏️ Devolver para o Galpão", key=f"edit_hist_{i}"):
                         for p_hist in rota['entregas']:
                             p_hist['uid'] = f"hist_{time.time()}_{p_hist['cliente']}"
-                            p_hist['status'] = 'espera' # Volta pro galpão direto
+                            p_hist['status'] = 'espera' 
                             st.session_state.pendentes.append(p_hist)
                         salvar_pendentes(st.session_state.pendentes)
                         hist.pop(i)
