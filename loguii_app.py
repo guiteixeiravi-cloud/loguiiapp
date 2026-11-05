@@ -38,6 +38,56 @@ caminho_logo = os.path.join(diretorio_atual, "logo.png")
 arquivo_historico = os.path.join(diretorio_atual, "historico_rotas.json")
 arquivo_pendentes = os.path.join(diretorio_atual, "pendentes.json")
 
+# ==========================================================
+# ☁️ INTEGRAÇÃO COM FIREBASE (BANCO DE DADOS EM NUVEM)
+# ==========================================================
+FIREBASE_URL = "https://loguii-default-rtdb.firebaseio.com"
+
+def salvar_pendentes(lista):
+    try:
+        requests.put(f"{FIREBASE_URL}/pendentes.json", json=lista)
+    except: 
+        with open(arquivo_pendentes, "w", encoding="utf-8") as f:
+            json.dump(lista, f, ensure_ascii=False, indent=4)
+
+def carregar_pendentes():
+    lista = []
+    try:
+        res = requests.get(f"{FIREBASE_URL}/pendentes.json")
+        if res.status_code == 200 and res.json() is not None:
+            lista = res.json()
+    except:
+        if os.path.exists(arquivo_pendentes):
+            try:
+                with open(arquivo_pendentes, "r", encoding="utf-8") as f:
+                    lista = json.load(f)
+            except: pass
+            
+    for item in lista:
+        if 'status' not in item:
+            item['status'] = 'espera'
+    return lista
+
+def salvar_historico(lista):
+    try:
+        requests.put(f"{FIREBASE_URL}/historico.json", json=lista)
+    except:
+        with open(arquivo_historico, "w", encoding="utf-8") as f:
+            json.dump(lista, f, ensure_ascii=False, indent=4)
+
+def carregar_historico():
+    try:
+        res = requests.get(f"{FIREBASE_URL}/historico.json")
+        if res.status_code == 200 and res.json() is not None:
+            return res.json()
+    except:
+        if os.path.exists(arquivo_historico):
+            try:
+                with open(arquivo_historico, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except: pass
+    return []
+
 # --- FUNÇÃO AUXILIAR PARA MAPAS (REMOVER ACENTOS) ---
 def remover_acentos(txt):
     if not txt: return ""
@@ -346,24 +396,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
 
     df_clientes, status_ok, msg_erro = carregar_clientes()
 
-    # --- FUNÇÕES DE SALVAMENTO DOS PENDENTES ---
-    def salvar_pendentes(lista):
-        with open(arquivo_pendentes, "w", encoding="utf-8") as f:
-            json.dump(lista, f, ensure_ascii=False, indent=4)
-
-    def carregar_pendentes():
-        if os.path.exists(arquivo_pendentes):
-            try:
-                with open(arquivo_pendentes, "r", encoding="utf-8") as f:
-                    lista = json.load(f)
-                    for item in lista:
-                        if 'status' not in item:
-                            item['status'] = 'espera'
-                    return lista
-            except:
-                pass
-        return []
-
     # --- FUNÇÃO DA MARCA D'ÁGUA ---
     def aplicar_marca_dagua(image_path):
         if os.path.exists(image_path):
@@ -518,7 +550,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
     st.subheader("🗺️ Visão Geográfica Geral")
     st.markdown("Legenda: 🔵 **Base** | 🟢 **No Caminhão (Embarcados)** | 🔴 **No Galpão (Espera)**")
 
-    # Garante coordenadas para pontos antigos que não tinham
     for p in st.session_state.pendentes:
         if not p.get('lat') or not p.get('lon'):
             lat, lon = geocodificar(p['endereco'])
@@ -533,7 +564,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
         
         for p in st.session_state.pendentes:
             if p.get('lat') and p.get('lon'):
-                # TRATAMENTO PARA O MAPA: Remove acentos e permite nomes mais longos
                 nome_tratado = remover_acentos(p.get("cliente", "Desconhecido"))
                 if len(nome_tratado) > 40:
                     nome_tratado = nome_tratado[:37] + "..."
@@ -565,7 +595,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
         with st.expander("📍 Expandir Mapa Interativo", expanded=True):
             camadas = []
             
-            # Galpão (Vermelho) - Bolinha e Texto com fonte menor (11)
             if not df_espera_mapa.empty:
                 camadas.append(pdk.Layer(
                     'ScatterplotLayer', data=df_espera_mapa, get_position='[lon, lat]',
@@ -578,7 +607,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                     background=True, get_background_color='[0, 0, 0, 150]'
                 ))
             
-            # Caminhão (Verde) - Bolinha e Texto com fonte menor (11)
             if not df_rota_mapa.empty:
                 camadas.append(pdk.Layer(
                     'ScatterplotLayer', data=df_rota_mapa, get_position='[lon, lat]',
@@ -591,7 +619,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                     background=True, get_background_color='[0, 0, 0, 150]'
                 ))
 
-            # Base (Azul)
             if not df_base_mapa.empty:
                 camadas.append(pdk.Layer(
                     'ScatterplotLayer', data=df_base_mapa, get_position='[lon, lat]',
@@ -636,7 +663,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                 salvar_pendentes(st.session_state.pendentes)
                 st.rerun()
 
-            # ALERTA DE ENDEREÇO INVÁLIDO (UX Aprimorada)
             if p.get('lat') is None:
                 col_end.markdown("<span style='color:#d32f2f; font-size:12px; font-weight:bold;'>⚠️ Endereço não localizado no mapa. Rota ignorará este ponto.</span>", unsafe_allow_html=True)
 
@@ -759,7 +785,18 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
         buffer.seek(0)
         return buffer
 
-    # NOVO ALGORITMO: GULOSO + 2-OPT (Fim das voltas inúteis)
+    def extrair_minutos(horario_str):
+        if not horario_str: return 720
+        try:
+            numeros = re.findall(r'\d+', str(horario_str))
+            if len(numeros) >= 2: return int(numeros[0]) * 60 + int(numeros[1])
+            elif len(numeros) == 1:
+                n = numeros[0]
+                if len(n) >= 3: return int(n[:-2]) * 60 + int(n[-2:])
+                return int(n) * 60
+        except: pass
+        return 720
+
     def otimizar_rota_com_urgencia(origem_lat, origem_lon, pedidos):
         if not pedidos: return []
         
@@ -767,7 +804,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
         current_lat, current_lon = float(origem_lat), float(origem_lon)
         rota_ordenada = []
         
-        # Passo 1: Construção da Rota (Nearest Neighbor com bônus de urgência)
         while unvisited:
             best_score = float('inf')
             best_idx = -1
@@ -782,7 +818,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
             rota_ordenada.append(next_p)
             current_lat, current_lon = float(next_p['lat']), float(next_p['lon'])
             
-        # Passo 2: Otimização Fina 2-Opt (Desfaz cruzamentos considerando o retorno à base)
         melhoria = True
         iteracoes = 0
         while melhoria and iteracoes < 100:
@@ -798,19 +833,16 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                     lat_i, lon_i = float(rota_ordenada[i]['lat']), float(rota_ordenada[i]['lon'])
                     lat_j, lon_j = float(rota_ordenada[j]['lat']), float(rota_ordenada[j]['lon'])
                     
-                    # Considera a Base como ponto final para fechar o ciclo
                     lat_next = float(rota_ordenada[j+1]['lat']) if j+1 < len(rota_ordenada) else float(origem_lat)
                     lon_next = float(rota_ordenada[j+1]['lon']) if j+1 < len(rota_ordenada) else float(origem_lon)
                     
-                    # Distância se mantiver como está
                     dist_atual = haversine(lat_prev, lon_prev, lat_i, lon_i) + \
                                  haversine(lat_j, lon_j, lat_next, lon_next)
                     
-                    # Distância se inverter o bloco do meio
                     dist_nova = haversine(lat_prev, lon_prev, lat_j, lon_j) + \
                                 haversine(lat_i, lon_i, lat_next, lon_next)
                                 
-                    if dist_nova < dist_atual - 0.05: # Só inverte se economizar pelo menos 50 metros
+                    if dist_nova < dist_atual - 0.05:
                         rota_ordenada[i:j+1] = list(reversed(rota_ordenada[i:j+1]))
                         melhoria = True
                         
@@ -857,14 +889,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                         st.session_state.pendentes = [p for p in st.session_state.pendentes if p.get('status', 'espera') != 'rota']
                         salvar_pendentes(st.session_state.pendentes)
                         
-                        historico = []
-                        if os.path.exists(arquivo_historico):
-                            try:
-                                with open(arquivo_historico, "r", encoding="utf-8") as f:
-                                    historico = json.load(f)
-                            except:
-                                pass
-                        
+                        historico = carregar_historico()
                         historico = [r for r in historico if (time.time() - r.get("timestamp", 0)) <= 172800]
                         
                         historico.insert(0, {
@@ -875,23 +900,15 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                             "link_maps": link_maps,
                             "link_rastreamento": "" 
                         })
-                        
-                        with open(arquivo_historico, "w", encoding="utf-8") as f:
-                            json.dump(historico, f, ensure_ascii=False, indent=4)
+                        salvar_historico(historico)
                     else:
                         st.error("Não foram encontrados endereços válidos para criar a rota.")
 
     # --- HISTÓRICO DE ROTAS E RASTREAMENTO AO VIVO ---
     st.divider()
     st.subheader("🕒 Histórico de Rotas e Rastreamento (Últimas 48h)")
-    hist = []
-    if os.path.exists(arquivo_historico):
-        try:
-            with open(arquivo_historico, "r", encoding="utf-8") as f:
-                hist = json.load(f)
-        except:
-            pass
-            
+    
+    hist = carregar_historico()
     hist = [r for r in hist if (time.time() - r.get("timestamp", 0)) <= 172800]
 
     if hist:
@@ -909,8 +926,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                 with col_btn_rastreio:
                     if novo_link != link_atual:
                         hist[i]['link_rastreamento'] = novo_link
-                        with open(arquivo_historico, "w", encoding="utf-8") as f:
-                            json.dump(hist, f, ensure_ascii=False, indent=4)
+                        salvar_historico(hist)
                         st.rerun()
                     if novo_link:
                         st.markdown(f"<a href='{novo_link}' target='_blank'><button style='width:100%; background-color:#2e7b32; color:white; border:none; padding:6px; border-radius:5px; cursor:pointer;'>📍 Acompanhar Agora</button></a>", unsafe_allow_html=True)
@@ -936,14 +952,12 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                             st.session_state.pendentes.append(p_hist)
                         salvar_pendentes(st.session_state.pendentes)
                         hist.pop(i)
-                        with open(arquivo_historico, "w", encoding="utf-8") as f:
-                            json.dump(hist, f, ensure_ascii=False, indent=4)
+                        salvar_historico(hist)
                         st.rerun()
                 with col_b3:
                     if st.button("🗑️ Excluir Rota", key=f"del_hist_{i}", type="secondary"):
                         hist.pop(i)
-                        with open(arquivo_historico, "w", encoding="utf-8") as f:
-                            json.dump(hist, f, ensure_ascii=False, indent=4)
+                        salvar_historico(hist)
                         st.rerun()
     else:
         st.info("Nenhuma rota salva ainda.")
