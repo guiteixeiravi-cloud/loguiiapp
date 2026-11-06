@@ -893,10 +893,18 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                         pdf_arquivo = gerar_pdf(ordem_entregas, nome_motorista)
                         nome_arquivo = f"LoGuii_Rota_{datetime.now().strftime('%d%m%Y_%H%M')}.pdf"
                         
-                        st.download_button(label="📄 Baixar PDF com Checklist da Rota", data=pdf_arquivo, file_name=nome_arquivo, mime="application/pdf", type="primary")
-                        
-                        st.session_state.pendentes = [p for p in st.session_state.pendentes if p.get('status', 'espera') != 'rota']
-                        salvar_pendentes(st.session_state.pendentes)
+                        # Botão de download com callback que limpa os embarcados ao baixar
+                        st.download_button(
+                            label="📄 Baixar PDF com Checklist da Rota", 
+                            data=pdf_arquivo, 
+                            file_name=nome_arquivo, 
+                            mime="application/pdf", 
+                            type="primary",
+                            on_click=lambda: (
+                                st.session_state.update({"pendentes": [p for p in st.session_state.pendentes if p.get('status', 'espera') != 'rota']}),
+                                salvar_pendentes(st.session_state.pendentes)
+                            )
+                        )
                         
                         historico = carregar_historico()
                         historico = [r for r in historico if (time.time() - r.get("timestamp", 0)) <= 172800]
