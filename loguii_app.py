@@ -88,6 +88,17 @@ def carregar_historico():
             except: pass
     return []
 
+# --- FROTA OFICIAL CADASTRADA ---
+FROTA_UNIAO = [
+    "Moto 1", 
+    "Moto 2", 
+    "Fiorino 1", 
+    "Fiorino 2", 
+    "Caminhão HR", 
+    "Caminhão Bongo", 
+    "Caminhão Mercedes"
+]
+
 # --- FUNÇÃO AUXILIAR PARA MAPAS (REMOVER ACENTOS) ---
 def remover_acentos(txt):
     if not txt: return ""
@@ -208,7 +219,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "menu":
     
     with col1:
         st.markdown("### 🚚 LoGuii Solução Logística")
-        st.markdown("Sistema completo para roteirização inteligente, gestão de fila de entregas e impressão de checklists.")
+        st.markdown("Sistema completo com Dashboard, roteirização inteligente, gestão de frotas e checklists.")
         if st.button("Acessar LoGuii", use_container_width=True, type="primary"):
             mudar_pagina("loguii")
             
@@ -372,7 +383,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "links":
 
 
 # ==========================================================
-# 🚚 TELA 2: LOGUII (SISTEMA DE ROTAS)
+# 🚚 TELA 2: LOGUII (SISTEMA DE ROTAS & DASHBOARD)
 # ==========================================================
 if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
     
@@ -428,13 +439,33 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
     col_texto, col_imagem = st.columns([5, 1])
     with col_texto:
         st.title("🚚 LoGuii Solução Logística")
-        st.markdown("Gerencie o Galpão de Espera e selecione os pedidos para montar a rota do Caminhão.")
+        st.markdown("Painel Operacional, Gestão de Frota e Roteirização Inteligente.")
     with col_imagem:
         if os.path.exists(caminho_caricatura):
             st.image(caminho_caricatura, width=130)
 
     if "pendentes" not in st.session_state:
         st.session_state.pendentes = carregar_pendentes()
+
+    # ==========================================================
+    # 📊 1. DASHBOARD LOGÍSTICO (NOVO)
+    # ==========================================================
+    st.markdown("### 📊 Dashboard Operacional")
+    
+    historico_geral = carregar_historico()
+    total_pedidos_galpao = len([p for p in st.session_state.pendentes if p.get('status', 'espera') == 'espera'])
+    total_pedidos_caminhao = len([p for p in st.session_state.pendentes if p.get('status', 'espera') == 'rota'])
+    total_rotas_realizadas = len(historico_geral)
+    
+    total_entregas_concluidas = sum([len(r.get('entregas', [])) for r in historico_geral])
+
+    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+    col_m1.metric("📦 Pedidos no Galpão", total_pedidos_galpao, help="Aguardando embarque")
+    col_m2.metric("🚚 Prontos no Veículo", total_pedidos_caminhao, help="Embarcados para rota")
+    col_m3.metric("🛣️ Rotas Concluídas", total_rotas_realizadas, help="Últimas 48 horas")
+    col_m4.metric("📍 Entregas Realizadas", total_entregas_concluidas, help="Total de pontos atendidos")
+
+    st.markdown("<br>", unsafe_allow_html=True)
 
     # --- INTELIGÊNCIA GEOGRÁFICA ---
     def haversine(lat1, lon1, lat2, lon2):
@@ -557,7 +588,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
 
     # --- LISTAGEM DE PENDENTES E MAPA PYDECK ---
     st.subheader("🗺️ Visão Geográfica Geral")
-    st.markdown("Legenda: 🔵 **Base** | 🟢 **No Caminhão (Embarcados)** | 🔴 **No Galpão (Espera)**")
+    st.markdown("Legenda: 🔵 **Base** | 🟢 **No Veículo (Embarcados)** | 🔴 **No Galpão (Espera)**")
 
     for p in st.session_state.pendentes:
         if not p.get('lat') or not p.get('lon'):
@@ -695,8 +726,8 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                 
             p['itens'] = st.multiselect("📦 Itens do Pedido:", options=lista_estoque, default=p.get('itens', []), key=f"itens_{p['uid']}")
 
-    # --- FILA 1: CAMINHÃO (EMBARCADOS) ---
-    st.markdown("### 🚚 Prontos para Embarque (Caminhão)")
+    # --- FILA 1: VEÍCULOS / EMBARCADOS ---
+    st.markdown("### 🚚 Prontos para Embarque (Veículo)")
     st.markdown("Itens que **entrarão na próxima rota gerada**.")
     pedidos_rota = [(i, p) for i, p in enumerate(st.session_state.pendentes) if p.get('status', 'espera') == 'rota']
     
@@ -704,7 +735,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
         for i, p in pedidos_rota:
             renderizar_linha_pedido(i, p, True)
     else:
-        st.info("Nenhum pedido no caminhão. Selecione pedidos do Galpão abaixo para embarcar.")
+        st.info("Nenhum pedido no veículo. Selecione pedidos do Galpão abaixo para embarcar.")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -722,7 +753,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
     salvar_pendentes(st.session_state.pendentes)
 
     # --- ROTINAS DE IMPRESSÃO E MAPA ---
-    def gerar_pdf(ordem_entregas, nome_motorista):
+    def gerar_pdf(ordem_entregas, veiculo_selecionado, nome_motorista):
         buffer = BytesIO()
         c = canvas.Canvas(buffer, pagesize=A4)
         largura, altura = A4
@@ -734,17 +765,21 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
         c.setFont("Helvetica", 10)
         c.drawString(180, altura - 65, f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
         
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(180, altura - 82, f"Veículo: {veiculo_selecionado}")
         if nome_motorista:
-            c.setFont("Helvetica-Bold", 12)
-            c.drawString(180, altura - 85, f"Motorista: {nome_motorista}")
+            c.drawString(180, altura - 98, f"Motorista: {nome_motorista}")
+            y_offset = 125
+        else:
+            y_offset = 115
             
         c.setFont("Helvetica-Bold", 12)
-        c.drawString(50, altura - 115, "Ponto de Partida:")
+        c.drawString(50, altura - y_offset, "Ponto de Partida:")
         c.setFont("Helvetica", 12)
-        c.drawString(50, altura - 130, "Rua Doutor Ivom Rodrigues Pereira, 5078")
-        c.line(50, altura - 145, largura - 50, altura - 145)
+        c.drawString(50, altura - (y_offset + 15), "Rua Doutor Ivom Rodrigues Pereira, 5078")
+        c.line(50, altura - (y_offset + 30), largura - 50, altura - (y_offset + 30))
         
-        y = altura - 175
+        y = altura - (y_offset + 60)
         
         for idx, p in enumerate(ordem_entregas):
             if y < 100:
@@ -758,7 +793,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                 c.setFillColorRGB(0.8, 0, 0)
                 
             c.setFont("Helvetica-Bold", 12)
-            
             c.drawString(50, y, f"[{idx+1}] {prefixo}Cliente: {p['cliente']}{num_pedido_str}")
             c.setFillColorRGB(0, 0, 0) 
             c.rect(largura - 70, y - 10, 15, 15)
@@ -857,16 +891,21 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                         
         return rota_ordenada
 
-    # --- OTIMIZAÇÃO E GERAÇÃO DA ROTA ---
+    # --- OTIMIZAÇÃO, GESTÃO DE VEÍCULOS E GERAÇÃO DA ROTA ---
     st.divider()
-    st.subheader("🗺️ Geração da Rota e Impressão")
-    nome_motorista = st.text_input("👨‍✈️ Nome do Motorista (Opcional):", placeholder="Ex: Roberto")
+    st.subheader("🗺️ Geração da Rota, Veículos & Impressão")
+    
+    col_veiculo_sel, col_mot_sel = st.columns(2)
+    with col_veiculo_sel:
+        veiculo_escolhido = st.selectbox("🚗 Selecione o Veículo Responsável:", options=FROTA_UNIAO)
+    with col_mot_sel:
+        nome_motorista = st.text_input("👨‍✈️ Nome do Motorista (Opcional):", placeholder="Ex: Roberto")
     
     pedidos_prontos = [p for p in st.session_state.pendentes if p.get('status', 'espera') == 'rota']
 
-    if st.button("🗺️ Gerar Rota (Somente Embarcados)", type="primary"):
+    if st.button("🗺️ Gerar Rota para o Veículo", type="primary"):
         if not pedidos_prontos:
-            st.warning("O Caminhão está vazio! Embarque pelo menos um pedido no Galpão para gerar a rota.")
+            st.warning("O veículo está vazio! Embarque pelo menos um pedido no Galpão para gerar a rota.")
         else:
             with st.spinner("Otimizando rota com algoritmo avançado para evitar cruzamentos..."):
                 lat_o, lon_o = geocodificar("Rua Doutor Ivom Rodrigues Pereira, 5078, Franca, SP, Brasil")
@@ -876,7 +915,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                     enderecos_validos = [p for p in pedidos_prontos if p.get('lat') and p.get('lon')]
                     if enderecos_validos:
                         ordem_entregas = otimizar_rota_com_urgencia(lat_o, lon_o, enderecos_validos)
-                        st.success("Rota perfeita gerada com sucesso!")
+                        st.success(f"Rota perfeita gerada para o veículo **{veiculo_escolhido}** com sucesso!")
                         st.subheader("📍 Ordem Sugerida de Entregas")
                         
                         for idx, p in enumerate(ordem_entregas):
@@ -890,8 +929,8 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                         st.markdown(f"[🔗 Abrir Rota no Google Maps]({link_maps})", unsafe_allow_html=True)
                         
                         st.divider()
-                        pdf_arquivo = gerar_pdf(ordem_entregas, nome_motorista)
-                        nome_arquivo = f"LoGuii_Rota_{datetime.now().strftime('%d%m%Y_%H%M')}.pdf"
+                        pdf_arquivo = gerar_pdf(ordem_entregas, veiculo_escolhido, nome_motorista)
+                        nome_arquivo = f"LoGuii_{veiculo_escolhido.replace(' ', '_')}_{datetime.now().strftime('%d%m%Y_%H%M')}.pdf"
                         
                         st.download_button(
                             label="📄 Baixar PDF com Checklist da Rota", 
@@ -911,6 +950,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                         historico.insert(0, {
                             "timestamp": time.time(), 
                             "data_formatada": datetime.now().strftime("%d/%m/%Y %H:%M"), 
+                            "veiculo": veiculo_escolhido,
                             "motorista": nome_motorista or "Não informado", 
                             "entregas": ordem_entregas, 
                             "link_maps": link_maps,
@@ -922,14 +962,16 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
 
     # --- HISTÓRICO DE ROTAS E RASTREAMENTO AO VIVO (COM IFRAME INTEGRADO) ---
     st.divider()
-    st.subheader("🕒 Histórico de Rotas e Rastreamento (Últimas 48h)")
+    st.subheader("🕒 Histórico de Rotas, Veículos e Rastreamento (Últimas 48h)")
     
     hist = carregar_historico()
     hist = [r for r in hist if (time.time() - r.get("timestamp", 0)) <= 172800]
 
     if hist:
         for i, rota in enumerate(hist):
-            with st.expander(f"🛣️ Rota de {rota['data_formatada']} - Motorista: {rota['motorista']} ({len(rota['entregas'])} entregas)"):
+            veiculo_reg = rota.get('veiculo', 'Veículo Geral')
+            motorista_reg = rota.get('motorista', 'Não informado')
+            with st.expander(f"🚗 [{veiculo_reg}] Rota de {rota['data_formatada']} - Motorista: {motorista_reg} ({len(rota['entregas'])} entregas)"):
                 
                 st.markdown("---")
                 st.markdown("### 📡 Visualização de Rastreamento ao Vivo")
@@ -943,13 +985,10 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                     salvar_historico(hist)
                     st.rerun()
                 
-                # Se o usuário colou o link, renderiza a visualização embutida
                 if novo_link:
-                    # Verifica se é um link de incorporação ou iframe direto, caso contrário tenta exibir via link web
                     if "<iframe" in novo_link:
                         components.html(novo_link, height=400)
                     else:
-                        # Se for um link padrão de compartilhamento/mapa do Google, encapsula em um iframe amigável
                         safe_url = novo_link.replace("&output=embed", "") + "&output=embed" if "output=embed" not in novo_link else novo_link
                         components.html(f'<iframe src="{safe_url}" width="100%" height="400" style="border:0;" allowfullscreen="" loading="lazy"></iframe>', height=400)
                 
@@ -966,7 +1005,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                 
                 col_b1, col_b2, col_b3 = st.columns([2, 2, 2])
                 with col_b1:
-                    st.download_button(label="📄 Re-imprimir PDF", data=gerar_pdf(rota['entregas'], rota['motorista']), file_name=f"LoGuii_Hist_{i}.pdf", mime="application/pdf", key=f"dl_hist_{i}")
+                    st.download_button(label="📄 Re-imprimir PDF", data=gerar_pdf(rota['entregas'], veiculo_reg, motorista_reg), file_name=f"LoGuii_Hist_{i}.pdf", mime="application/pdf", key=f"dl_hist_{i}")
                 with col_b2:
                     if st.button("✏️ Devolver para o Galpão", key=f"edit_hist_{i}"):
                         for p_hist in rota['entregas']:
