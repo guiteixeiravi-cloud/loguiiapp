@@ -893,7 +893,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                         pdf_arquivo = gerar_pdf(ordem_entregas, nome_motorista)
                         nome_arquivo = f"LoGuii_Rota_{datetime.now().strftime('%d%m%Y_%H%M')}.pdf"
                         
-                        # Botão de download com callback que limpa os embarcados ao baixar
                         st.download_button(
                             label="📄 Baixar PDF com Checklist da Rota", 
                             data=pdf_arquivo, 
@@ -921,7 +920,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                     else:
                         st.error("Não foram encontrados endereços válidos para criar a rota.")
 
-    # --- HISTÓRICO DE ROTAS E RASTREAMENTO AO VIVO ---
+    # --- HISTÓRICO DE ROTAS E RASTREAMENTO AO VIVO (COM IFRAME INTEGRADO) ---
     st.divider()
     st.subheader("🕒 Histórico de Rotas e Rastreamento (Últimas 48h)")
     
@@ -933,23 +932,30 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
             with st.expander(f"🛣️ Rota de {rota['data_formatada']} - Motorista: {rota['motorista']} ({len(rota['entregas'])} entregas)"):
                 
                 st.markdown("---")
-                st.markdown("**📡 Rastreamento em Tempo Real**")
-                col_link, col_btn_rastreio = st.columns([4, 2])
+                st.markdown("### 📡 Visualização de Rastreamento ao Vivo")
+                st.markdown("Cole o link de compartilhamento do Google Maps ou o código de incorporação (`iframe`) abaixo para visualizar a rota em tempo real direto na tela:")
                 
                 link_atual = rota.get('link_rastreamento', '')
-                with col_link:
-                    novo_link = st.text_input("Cole o link do Maps ou WhatsApp aqui:", value=link_atual, key=f"link_rastreio_{i}", label_visibility="collapsed", placeholder="Cole o link de rastreamento ao vivo aqui...")
+                novo_link = st.text_input("Link de Rastreamento ao Vivo:", value=link_atual, key=f"link_rastreio_{i}", placeholder="Ex: https://www.google.com/maps/embed?pb=... ou link de compartilhamento")
                 
-                with col_btn_rastreio:
-                    if novo_link != link_atual:
-                        hist[i]['link_rastreamento'] = novo_link
-                        salvar_historico(hist)
-                        st.rerun()
-                    if novo_link:
-                        st.markdown(f"<a href='{novo_link}' target='_blank'><button style='width:100%; background-color:#2e7b32; color:white; border:none; padding:6px; border-radius:5px; cursor:pointer;'>📍 Acompanhar Agora</button></a>", unsafe_allow_html=True)
+                if novo_link != link_atual:
+                    hist[i]['link_rastreamento'] = novo_link
+                    salvar_historico(hist)
+                    st.rerun()
+                
+                # Se o usuário colou o link, renderiza a visualização embutida
+                if novo_link:
+                    # Verifica se é um link de incorporação ou iframe direto, caso contrário tenta exibir via link web
+                    if "<iframe" in novo_link:
+                        components.html(novo_link, height=400)
+                    else:
+                        # Se for um link padrão de compartilhamento/mapa do Google, encapsula em um iframe amigável
+                        safe_url = novo_link.replace("&output=embed", "") + "&output=embed" if "output=embed" not in novo_link else novo_link
+                        components.html(f'<iframe src="{safe_url}" width="100%" height="400" style="border:0;" allowfullscreen="" loading="lazy"></iframe>', height=400)
+                
                 st.markdown("---")
+                st.markdown(f"[🔗 Abrir Rota Completa no Google Maps]({rota['link_maps']})", unsafe_allow_html=True)
                 
-                st.markdown(f"[🔗 Abrir Rota no Google Maps]({rota['link_maps']})", unsafe_allow_html=True)
                 for p in rota['entregas']:
                     urg_text = f" **[URG. {p.get('horario', '')}]**" if p.get('urgente') else ""
                     st.write(f"-{urg_text} {p['cliente']}: *{p['endereco']}*")
