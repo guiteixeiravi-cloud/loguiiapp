@@ -219,7 +219,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "menu":
     
     with col1:
         st.markdown("### 🚚 LoGuii Solução Logística")
-        st.markdown("Sistema completo com Dashboard, roteirização inteligente, gestão de frotas e checklists.")
+        st.markdown("Sistema completo com Dashboard, roteirização inteligente, gestão de frotas e status de entregas.")
         if st.button("Acessar LoGuii", use_container_width=True, type="primary"):
             mudar_pagina("loguii")
             
@@ -448,22 +448,22 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
         st.session_state.pendentes = carregar_pendentes()
 
     # ==========================================================
-    # 📊 1. DASHBOARD LOGÍSTICO (NOVO)
+    # 📊 1. DASHBOARD LOGÍSTICO
     # ==========================================================
     st.markdown("### 📊 Dashboard Operacional")
     
     historico_geral = carregar_historico()
     total_pedidos_galpao = len([p for p in st.session_state.pendentes if p.get('status', 'espera') == 'espera'])
-    total_pedidos_caminhao = len([p for p in st.session_state.pendentes if p.get('status', 'espera') == 'rota'])
+    total_pedidos_veiculo = len([p for p in st.session_state.pendentes if p.get('status', 'espera') == 'rota'])
     total_rotas_realizadas = len(historico_geral)
     
-    total_entregas_concluidas = sum([len(r.get('entregas', [])) for r in historico_geral])
+    total_entregas_concluidas = sum([len([p for p in r.get('entregas', []) if p.get('status_entrega') == 'Entregue']) for r in historico_geral])
 
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
     col_m1.metric("📦 Pedidos no Galpão", total_pedidos_galpao, help="Aguardando embarque")
-    col_m2.metric("🚚 Prontos no Veículo", total_pedidos_caminhao, help="Embarcados para rota")
-    col_m3.metric("🛣️ Rotas Concluídas", total_rotas_realizadas, help="Últimas 48 horas")
-    col_m4.metric("📍 Entregas Realizadas", total_entregas_concluidas, help="Total de pontos atendidos")
+    col_m2.metric("🚚 Prontos no Veículo", total_pedidos_veiculo, help="Embarcados para rota")
+    col_m3.metric("🛣️ Rotas Registradas", total_rotas_realizadas, help="Últimas 48 horas")
+    col_m4.metric("✅ Entregues com Sucesso", total_entregas_concluidas, help="Check-ins confirmados")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -858,6 +858,8 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                     best_score = score
                     best_idx = i
             next_p = unvisited.pop(best_idx)
+            # Define status de entrega padrão inicial
+            next_p['status_entrega'] = 'Pendente'
             rota_ordenada.append(next_p)
             current_lat, current_lon = float(next_p['lat']), float(next_p['lon'])
             
@@ -960,9 +962,9 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                     else:
                         st.error("Não foram encontrados endereços válidos para criar a rota.")
 
-    # --- HISTÓRICO DE ROTAS E RASTREAMENTO AO VIVO (COM IFRAME INTEGRADO) ---
+    # --- HISTÓRICO DE ROTAS, CHECK-IN POR PARADA E RASTREAMENTO AO VIVO ---
     st.divider()
-    st.subheader("🕒 Histórico de Rotas, Veículos e Rastreamento (Últimas 48h)")
+    st.subheader("🕒 Histórico de Rotas, Status de Entregas & Rastreamento (Últimas 48h)")
     
     hist = carregar_historico()
     hist = [r for r in hist if (time.time() - r.get("timestamp", 0)) <= 172800]
@@ -973,6 +975,27 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
             motorista_reg = rota.get('motorista', 'Não informado')
             with st.expander(f"🚗 [{veiculo_reg}] Rota de {rota['data_formatada']} - Motorista: {motorista_reg} ({len(rota['entregas'])} entregas)"):
                 
+                st.markdown("---")
+                st.markdown("### 📍 Check-in de Status por Parada Individual (Item 1)")
+                st.markdown("Atualize o status de cada entrega em tempo real durante o trajeto:")
+                
+                for idx_p, p_item in enumerate(rota['entregas']):
+                    col_cli_info, col_status_sel = st.columns([3, 2])
+                    with col_cli_info:
+                        urg_lbl = f" 🔴 [URG. {p_item.get('horario', '')}]" if p_item.get('urgente') else ""
+                        st.markdown(f"**Parada {idx_p+1}:** {p_item['cliente']}{urg_lbl}<br><span style='font-size:12px; color:gray;'>{p_item['endereco']}</span>", unsafe_allow_html=True)
+                    
+                    with col_status_sel:
+                        status_atuais = ["Pendente", "Entregue", "Ausente / Não Entregue", "Reagendado"]
+                        status_atual_val = p_item.get('status_entrega', 'Pendente')
+                        idx_default = status_atuais.index(status_atual_val) if status_atual_val in status_atuais else 0
+                        
+                        novo_status = st.selectbox(f"Status Parada {idx_p+1}", options=status_atuais, index=idx_default, key=f"st_parada_{i}_{idx_p}", label_visibility="collapsed")
+                        if novo_status != status_atual_val:
+                            rota['entregas'][idx_p]['status_entrega'] = novo_status
+                            salvar_historico(hist)
+                            st.rerun()
+
                 st.markdown("---")
                 st.markdown("### 📡 Visualização de Rastreamento ao Vivo")
                 st.markdown("Cole o link de compartilhamento do Google Maps ou o código de incorporação (`iframe`) abaixo para visualizar a rota em tempo real direto na tela:")
@@ -994,14 +1017,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                 
                 st.markdown("---")
                 st.markdown(f"[🔗 Abrir Rota Completa no Google Maps]({rota['link_maps']})", unsafe_allow_html=True)
-                
-                for p in rota['entregas']:
-                    urg_text = f" **[URG. {p.get('horario', '')}]**" if p.get('urgente') else ""
-                    st.write(f"-{urg_text} {p['cliente']}: *{p['endereco']}*")
-                    
-                    if p.get('itens'):
-                        for item in p['itens']:
-                            st.write(f"&nbsp;&nbsp;&nbsp;&nbsp;📦 {item}")
                 
                 col_b1, col_b2, col_b3 = st.columns([2, 2, 2])
                 with col_b1:
