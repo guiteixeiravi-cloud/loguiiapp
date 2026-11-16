@@ -455,15 +455,14 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
     historico_geral = carregar_historico()
     total_pedidos_galpao = len([p for p in st.session_state.pendentes if p.get('status', 'espera') == 'espera'])
     total_pedidos_veiculo = len([p for p in st.session_state.pendentes if p.get('status', 'espera') == 'rota'])
-    total_rotas_realizadas = len(historico_geral)
-    
+    total_em_transito = sum([len([p for p in r.get('entregas', []) if p.get('status_entrega', 'Pendente') != 'Entregue']) for r in historico_geral])
     total_entregas_concluidas = sum([len([p for p in r.get('entregas', []) if p.get('status_entrega') == 'Entregue']) for r in historico_geral])
 
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    col_m1.metric("📦 Pedidos no Galpão", total_pedidos_galpao, help="Aguardando embarque")
-    col_m2.metric("🚚 Prontos no Veículo", total_pedidos_veiculo, help="Embarcados para rota")
-    col_m3.metric("🛣️ Rotas Registradas", total_rotas_realizadas, help="Últimas 48 horas")
-    col_m4.metric("✅ Entregues com Sucesso", total_entregas_concluidas, help="Check-ins confirmados")
+    col_m1.metric("📦 No Galpão", total_pedidos_galpao, help="Aguardando embarque")
+    col_m2.metric("🟢 Embarcados", total_pedidos_veiculo, help="Selecionados para próxima rota")
+    col_m3.metric("🟡 Em Rota (Rua)", total_em_transito, help="Pedidos em trânsito aguardando baixa")
+    col_m4.metric("✅ Entregues", total_entregas_concluidas, help="Check-ins confirmados")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -588,7 +587,7 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
 
     # --- LISTAGEM DE PENDENTES E MAPA PYDECK ---
     st.subheader("🗺️ Visão Geográfica Geral")
-    st.markdown("Legenda: 🔵 **Base** | 🟢 **No Veículo (Embarcados)** | 🔴 **No Galpão (Espera)**")
+    st.markdown("Legenda: 🔵 **Base** | 🟢 **Embarcados (Aguardando Rota)** | 🟡 **Em Rota (Na Rua)** | 🔴 **No Galpão (Espera)**")
 
     for p in st.session_state.pendentes:
         if not p.get('lat') or not p.get('lon'):
@@ -598,9 +597,29 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
 
     lat_base, lon_base = geocodificar("Rua Doutor Ivom Rodrigues Pereira, 5078, Franca, SP, Brasil")
 
-    if st.session_state.pendentes or (lat_base and lon_base):
+    # Coleta pedidos em trânsito do histórico (ainda não marcados como 'Entregue')
+    hist_ativo = [r for r in historico_geral if (time.time() - r.get("timestamp", 0)) <= 172800]
+    dados_mapa_transito = []
+    for rota_ativa in hist_ativo:
+        veic_nome = rota_ativa.get('veiculo', 'Veículo não informado')
+        mot_nome = rota_ativa.get('motorista', 'Não informado')
+        for p_rota in rota_ativa.get('entregas', []):
+            if p_rota.get('status_entrega', 'Pendente') != 'Entregue':
+                if p_rota.get('lat') and p_rota.get('lon'):
+                    nome_tratado = remover_acentos(p_rota.get("cliente", "Desconhecido"))
+                    if len(nome_tratado) > 40:
+                        nome_tratado = nome_tratado[:37] + "..."
+                    dados_mapa_transito.append({
+                        "lat": float(p_rota['lat']),
+                        "lon": float(p_rota['lon']),
+                        "Cliente": nome_tratado,
+                        "Endereco": p_rota.get("endereco", "Não informado"),
+                        "InfoExtra": f"Status: Em Rota ({p_rota.get('status_entrega', 'Pendente')})\nVeiculo: {veic_nome}\nMotorista: {mot_nome}"
+                    })
+
+    if st.session_state.pendentes or dados_mapa_transito or (lat_base and lon_base):
         dados_mapa_espera = []
-        dados_mapa_rota = []
+        dados_mapa_embarcado = []
         
         for p in st.session_state.pendentes:
             if p.get('lat') and p.get('lon'):
@@ -608,16 +627,22 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                 if len(nome_tratado) > 40:
                     nome_tratado = nome_tratado[:37] + "..."
                 
-                ponto = {
-                    "lat": float(p['lat']), 
-                    "lon": float(p['lon']),
-                    "Cliente": nome_tratado,
-                    "Endereco": p.get("endereco", "Não informado")
-                }
                 if p.get('status', 'espera') == 'rota':
-                    dados_mapa_rota.append(ponto)
+                    dados_mapa_embarcado.append({
+                        "lat": float(p['lat']), 
+                        "lon": float(p['lon']),
+                        "Cliente": nome_tratado,
+                        "Endereco": p.get("endereco", "Não informado"),
+                        "InfoExtra": "Status: Embarcado (Aguardando gerar rota)"
+                    })
                 else:
-                    dados_mapa_espera.append(ponto)
+                    dados_mapa_espera.append({
+                        "lat": float(p['lat']), 
+                        "lon": float(p['lon']),
+                        "Cliente": nome_tratado,
+                        "Endereco": p.get("endereco", "Não informado"),
+                        "InfoExtra": "Status: No Galpão de Espera"
+                    })
         
         dados_mapa_base = []
         if lat_base and lon_base:
@@ -625,16 +650,19 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                 "lat": lat_base,
                 "lon": lon_base,
                 "Cliente": "Base Uniao Embalagens",
-                "Endereco": "Ponto de Partida e Retorno"
+                "Endereco": "Ponto de Partida e Retorno",
+                "InfoExtra": "Base Operacional"
             })
 
-        df_espera_mapa = pd.DataFrame(dados_mapa_espera) if dados_mapa_espera else pd.DataFrame(columns=["lat", "lon", "Cliente", "Endereco"])
-        df_rota_mapa = pd.DataFrame(dados_mapa_rota) if dados_mapa_rota else pd.DataFrame(columns=["lat", "lon", "Cliente", "Endereco"])
+        df_espera_mapa = pd.DataFrame(dados_mapa_espera) if dados_mapa_espera else pd.DataFrame(columns=["lat", "lon", "Cliente", "Endereco", "InfoExtra"])
+        df_embarcado_mapa = pd.DataFrame(dados_mapa_embarcado) if dados_mapa_embarcado else pd.DataFrame(columns=["lat", "lon", "Cliente", "Endereco", "InfoExtra"])
+        df_transito_mapa = pd.DataFrame(dados_mapa_transito) if dados_mapa_transito else pd.DataFrame(columns=["lat", "lon", "Cliente", "Endereco", "InfoExtra"])
         df_base_mapa = pd.DataFrame(dados_mapa_base)
 
         with st.expander("📍 Expandir Mapa Interativo", expanded=True):
             camadas = []
             
+            # Vermelho: Galpão
             if not df_espera_mapa.empty:
                 camadas.append(pdk.Layer(
                     'ScatterplotLayer', data=df_espera_mapa, get_position='[lon, lat]',
@@ -644,21 +672,36 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                     'TextLayer', data=df_espera_mapa, get_position='[lon, lat]',
                     get_text='Cliente', get_color='[255, 255, 255, 255]', get_size=11,
                     get_alignment_baseline="'bottom'", get_pixel_offset=[0, -15],
-                    background=True, get_background_color='[0, 0, 0, 150]'
+                    background=True, get_background_color='[0, 0, 0, 150]', pickable=True
                 ))
             
-            if not df_rota_mapa.empty:
+            # Verde: Embarcados (Prontos para gerar rota)
+            if not df_embarcado_mapa.empty:
                 camadas.append(pdk.Layer(
-                    'ScatterplotLayer', data=df_rota_mapa, get_position='[lon, lat]',
+                    'ScatterplotLayer', data=df_embarcado_mapa, get_position='[lon, lat]',
                     get_color='[30, 200, 50, 200]', get_radius=180, pickable=True
                 ))
                 camadas.append(pdk.Layer(
-                    'TextLayer', data=df_rota_mapa, get_position='[lon, lat]',
+                    'TextLayer', data=df_embarcado_mapa, get_position='[lon, lat]',
                     get_text='Cliente', get_color='[255, 255, 255, 255]', get_size=11, 
                     get_alignment_baseline="'bottom'", get_pixel_offset=[0, -18],
-                    background=True, get_background_color='[0, 0, 0, 150]'
+                    background=True, get_background_color='[0, 0, 0, 150]', pickable=True
                 ))
 
+            # Amarelo: Em Rota (Já saiu para entrega)
+            if not df_transito_mapa.empty:
+                camadas.append(pdk.Layer(
+                    'ScatterplotLayer', data=df_transito_mapa, get_position='[lon, lat]',
+                    get_color='[255, 200, 0, 220]', get_radius=190, pickable=True
+                ))
+                camadas.append(pdk.Layer(
+                    'TextLayer', data=df_transito_mapa, get_position='[lon, lat]',
+                    get_text='Cliente', get_color='[255, 255, 255, 255]', get_size=11, 
+                    get_alignment_baseline="'bottom'", get_pixel_offset=[0, -19],
+                    background=True, get_background_color='[0, 0, 0, 170]', pickable=True
+                ))
+
+            # Azul: Base
             if not df_base_mapa.empty:
                 camadas.append(pdk.Layer(
                     'ScatterplotLayer', data=df_base_mapa, get_position='[lon, lat]',
@@ -668,14 +711,19 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                     'TextLayer', data=df_base_mapa, get_position='[lon, lat]',
                     get_text='Cliente', get_color='[255, 255, 255, 255]', get_size=12, 
                     get_alignment_baseline="'bottom'", get_pixel_offset=[0, -22],
-                    background=True, get_background_color='[0, 0, 0, 180]'
+                    background=True, get_background_color='[0, 0, 0, 180]', pickable=True
                 ))
 
             lat_centro = lat_base if lat_base else (-20.5387)
             lon_centro = lon_base if lon_base else (-47.4005)
 
             view_state = pdk.ViewState(latitude=lat_centro, longitude=lon_centro, zoom=13, pitch=0)
-            r = pdk.Deck(map_style=None, layers=camadas, initial_view_state=view_state, tooltip={"text": "{Cliente}\n{Endereco}"})
+            r = pdk.Deck(
+                map_style=None, 
+                layers=camadas, 
+                initial_view_state=view_state, 
+                tooltip={"text": "{Cliente}\n{Endereco}\n{InfoExtra}"}
+            )
             st.pydeck_chart(r)
 
     st.divider()
@@ -858,7 +906,6 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                     best_score = score
                     best_idx = i
             next_p = unvisited.pop(best_idx)
-            # Define status de entrega padrão inicial
             next_p['status_entrega'] = 'Pendente'
             rota_ordenada.append(next_p)
             current_lat, current_lon = float(next_p['lat']), float(next_p['lon'])
@@ -917,34 +964,10 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                     enderecos_validos = [p for p in pedidos_prontos if p.get('lat') and p.get('lon')]
                     if enderecos_validos:
                         ordem_entregas = otimizar_rota_com_urgencia(lat_o, lon_o, enderecos_validos)
-                        st.success(f"Rota perfeita gerada para o veículo **{veiculo_escolhido}** com sucesso!")
-                        st.subheader("📍 Ordem Sugerida de Entregas")
-                        
-                        for idx, p in enumerate(ordem_entregas):
-                            urg_text = f" **[URG. {p.get('horario', '')}]** " if p.get('urgente') else ""
-                            st.markdown(f"**Parada {idx+1}:** {urg_text}{p['cliente']} — *{p['endereco']}*")
                         
                         origem_link = "Rua Doutor Ivom Rodrigues Pereira, 5078, Franca, SP".replace(" ", "+")
                         pontos = "|".join([f"{p['endereco']}, Franca, SP".replace(" ", "+") for p in ordem_entregas])
                         link_maps = f"https://www.google.com/maps/dir/?api=1&origin={origem_link}&destination={origem_link}&waypoints={pontos}"
-                        
-                        st.markdown(f"[🔗 Abrir Rota no Google Maps]({link_maps})", unsafe_allow_html=True)
-                        
-                        st.divider()
-                        pdf_arquivo = gerar_pdf(ordem_entregas, veiculo_escolhido, nome_motorista)
-                        nome_arquivo = f"LoGuii_{veiculo_escolhido.replace(' ', '_')}_{datetime.now().strftime('%d%m%Y_%H%M')}.pdf"
-                        
-                        st.download_button(
-                            label="📄 Baixar PDF com Checklist da Rota", 
-                            data=pdf_arquivo, 
-                            file_name=nome_arquivo, 
-                            mime="application/pdf", 
-                            type="primary",
-                            on_click=lambda: (
-                                st.session_state.update({"pendentes": [p for p in st.session_state.pendentes if p.get('status', 'espera') != 'rota']}),
-                                salvar_pendentes(st.session_state.pendentes)
-                            )
-                        )
                         
                         historico = carregar_historico()
                         historico = [r for r in historico if (time.time() - r.get("timestamp", 0)) <= 172800]
@@ -959,6 +982,13 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                             "link_rastreamento": "" 
                         })
                         salvar_historico(historico)
+
+                        # Remove apenas pelo uid específico os pedidos roteirizados da fila de embarque
+                        # (preservando outros pedidos do mesmo cliente que estejam no Galpão)
+                        uids_roteirizados = {p['uid'] for p in enderecos_validos}
+                        st.session_state.pendentes = [p for p in st.session_state.pendentes if p['uid'] not in uids_roteirizados]
+                        salvar_pendentes(st.session_state.pendentes)
+                        st.rerun()
                     else:
                         st.error("Não foram encontrados endereços válidos para criar a rota.")
 
@@ -973,17 +1003,18 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
         for i, rota in enumerate(hist):
             veiculo_reg = rota.get('veiculo', 'Veículo Geral')
             motorista_reg = rota.get('motorista', 'Não informado')
-            with st.expander(f"🚗 [{veiculo_reg}] Rota de {rota['data_formatada']} - Motorista: {motorista_reg} ({len(rota['entregas'])} entregas)"):
+            with st.expander(f"🚗 [{veiculo_reg}] Rota de {rota['data_formatada']} - Motorista: {motorista_reg} ({len(rota['entregas'])} entregas)", expanded=(i == 0)):
                 
                 st.markdown("---")
-                st.markdown("### 📍 Check-in de Status por Parada Individual (Item 1)")
+                st.markdown("### 📍 Check-in de Status por Parada Individual")
                 st.markdown("Atualize o status de cada entrega em tempo real durante o trajeto:")
                 
                 for idx_p, p_item in enumerate(rota['entregas']):
                     col_cli_info, col_status_sel = st.columns([3, 2])
                     with col_cli_info:
                         urg_lbl = f" 🔴 [URG. {p_item.get('horario', '')}]" if p_item.get('urgente') else ""
-                        st.markdown(f"**Parada {idx_p+1}:** {p_item['cliente']}{urg_lbl}<br><span style='font-size:12px; color:gray;'>{p_item['endereco']}</span>", unsafe_allow_html=True)
+                        ped_lbl = f" (Ped: {p_item['pedido_num']})" if p_item.get('pedido_num') else ""
+                        st.markdown(f"**Parada {idx_p+1}:** {p_item['cliente']}{ped_lbl}{urg_lbl}<br><span style='font-size:12px; color:gray;'>{p_item['endereco']}</span>", unsafe_allow_html=True)
                     
                     with col_status_sel:
                         status_atuais = ["Pendente", "Entregue", "Ausente / Não Entregue", "Reagendado"]
@@ -994,6 +1025,16 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                         if novo_status != status_atual_val:
                             rota['entregas'][idx_p]['status_entrega'] = novo_status
                             salvar_historico(hist)
+
+                            # Se marcado como Entregue, garante remoção apenas pelo uid específico
+                            if novo_status == "Entregue":
+                                uid_target = p_item.get('uid')
+                                if uid_target:
+                                    st.session_state.pendentes = [
+                                        p for p in st.session_state.pendentes
+                                        if p.get('uid') != uid_target
+                                    ]
+                                    salvar_pendentes(st.session_state.pendentes)
                             st.rerun()
 
                 st.markdown("---")
@@ -1020,13 +1061,14 @@ if st.session_state.autenticado and st.session_state.pagina_atual == "loguii":
                 
                 col_b1, col_b2, col_b3 = st.columns([2, 2, 2])
                 with col_b1:
-                    st.download_button(label="📄 Re-imprimir PDF", data=gerar_pdf(rota['entregas'], veiculo_reg, motorista_reg), file_name=f"LoGuii_Hist_{i}.pdf", mime="application/pdf", key=f"dl_hist_{i}")
+                    st.download_button(label="📄 Baixar / Re-imprimir PDF", data=gerar_pdf(rota['entregas'], veiculo_reg, motorista_reg), file_name=f"LoGuii_{veiculo_reg.replace(' ', '_')}_{i}.pdf", mime="application/pdf", key=f"dl_hist_{i}", type="primary")
                 with col_b2:
                     if st.button("✏️ Devolver para o Galpão", key=f"edit_hist_{i}"):
                         for p_hist in rota['entregas']:
-                            p_hist['uid'] = f"hist_{time.time()}_{p_hist['cliente']}"
-                            p_hist['status'] = 'espera' 
-                            st.session_state.pendentes.append(p_hist)
+                            if p_hist.get('status_entrega') != 'Entregue':
+                                p_hist['uid'] = f"hist_{time.time()}_{p_hist['cliente']}"
+                                p_hist['status'] = 'espera' 
+                                st.session_state.pendentes.append(p_hist)
                         salvar_pendentes(st.session_state.pendentes)
                         hist.pop(i)
                         salvar_historico(hist)
